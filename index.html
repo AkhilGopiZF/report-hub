@@ -130,7 +130,7 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding-block:0 32px}
 </header>
 <nav class="tabs" aria-label="Operating sections"><div class="wrap" id="tabs" role="tablist"></div></nav>
 <main><div class="wrap" id="main"></div></main>
-<footer class="wrap">Files are stored in the owner's OneDrive. Opening a report may ask you to sign in to Power BI with your work account.</footer>
+<footer class="wrap">Reports open in Power BI on the web and need a Power BI Pro, Premium Per User or E5 licence. The first open of a new file takes a little longer.</footer>
 
 <dialog id="linkDlg">
   <form id="linkForm" method="dialog">
@@ -144,7 +144,7 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding-block:0 32px}
   <form method="dialog"><h3>Delete file?</h3><p id="confirmText" style="margin:0"></p>
     <div class="dlg-acts"><button value="no">Cancel</button><button value="yes" class="btn-primary">Delete</button></div></form>
 </dialog>
-<input type="file" id="fileInput" accept=".pbix,.pbit,.pbip,.xlsx,.pdf" multiple hidden>
+<input type="file" id="fileInput" accept=".pbix,.xlsx,.pdf" multiple hidden>
 
 <script>
 (function(){
@@ -301,13 +301,31 @@ function renderList(){
   document.querySelector(".list").innerHTML = list.length ? list.map(rowHtml).join("") : `<div class="empty">No reports match "${esc(filter)}".</div>`;
   bindRows();
 }
+/* A .pbix opened from the OneDrive file view loads in Power BI's web viewer.
+   Convert the file's direct address into that view:
+   https://<tenant>-my.sharepoint.com/my?id=<file path>&parent=<folder path> */
+function webViewerUrl(webUrl){
+  try {
+    const u = new URL(webUrl);
+    const path = decodeURIComponent(u.pathname);
+    if (!path.startsWith("/personal/")) return webUrl + (u.search ? "&" : "?") + "web=1";
+    const parent = path.slice(0, path.lastIndexOf("/"));
+    return `${u.origin}/my?id=${encodeURIComponent(path)}&parent=${encodeURIComponent(parent)}`;
+  } catch { return webUrl; }
+}
 function rowHtml(it){
   const [k, cls] = kindOf(it);
   const who = it.lastModifiedBy?.user?.displayName || "";
   const title = it.title || it.name;
+  const dl = it["@microsoft.graph.downloadUrl"] ? `<a class="btn" href="${esc(it["@microsoft.graph.downloadUrl"])}">Download</a>` : "";
+  const ext = it.name.split(".").pop().toLowerCase();
   const acts = it.reportUrl
     ? `<a class="btn btn-primary" href="${esc(it.reportUrl)}" target="_blank" rel="noopener">Open in Power BI</a>`
-    : `<a class="btn btn-primary" href="${esc(it.webUrl)}" target="_blank" rel="noopener">Open</a>${it["@microsoft.graph.downloadUrl"]?`<a class="btn" href="${esc(it["@microsoft.graph.downloadUrl"])}">Download</a>`:""}`;
+    : ext === "pbix"
+    ? `<a class="btn btn-primary" href="${esc(webViewerUrl(it.webUrl))}" target="_blank" rel="noopener">Open in Power BI</a>${dl}`
+    : ext === "pbip"
+    ? `<span class="s" style="font:12px var(--f-mono);color:var(--muted)">Project file – publish to view online</span>${dl}`
+    : `<a class="btn btn-primary" href="${esc(it.webUrl)}" target="_blank" rel="noopener">Open</a>${dl}`;
   return `<div class="row" data-id="${esc(it.id)}"><span class="kind ${cls}">${esc(k)}</span>
     <div class="meta"><div class="t">${esc(title)}</div><div class="s">${it.reportUrl ? "app.powerbi.com" : fmtSize(it.size)} · ${fmtDate(it.lastModifiedDateTime)}${who?" · "+esc(who):""}</div></div>
     <div class="acts">${acts}${isOwner()?`<button class="del" data-del="${esc(it.id)}">Delete</button>`:""}</div></div>`;
@@ -345,8 +363,13 @@ async function handleFiles(files){
     [...files].forEach(f => items[current].unshift({ id:"d"+Math.random(), name:f.name, size:f.size, webUrl:"#", lastModifiedDateTime:new Date().toISOString(), lastModifiedBy:{user:{displayName:"You"}} }));
     renderTabs(); renderList(); toast("Added to list (demo — nothing uploaded)"); return;
   }
-  for (const f of files){ try { await uploadFile(f); } catch(e){ toast(e.message); } }
-  toast(files.length + (files.length>1?" files":" file") + " uploaded to " + C.sections.find(s=>s.id===current).name);
+  const all = [...files];
+  const proj = all.filter(f => /\.pbip$/i.test(f.name));
+  const ok = all.filter(f => !/\.pbip$/i.test(f.name));
+  if (proj.length) toast("A .pbip project can't open in Power BI on the web. In Power BI Desktop use File → Save as → .pbix, then upload that.");
+  if (!ok.length) return;
+  for (const f of ok){ try { await uploadFile(f); } catch(e){ toast(e.message); } }
+  if (!proj.length) toast(ok.length + (ok.length>1?" files":" file") + " uploaded to " + C.sections.find(s=>s.id===current).name);
   refresh(true);
 }
 $("#fileInput").onchange = e => { handleFiles(e.target.files); e.target.value = ""; };
