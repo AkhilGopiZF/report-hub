@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Operations Report Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
+<script>
+/* =====================================================================
+   CONFIGURATION — edit these values after registering the app in
+   Microsoft Entra (see README.md). Leave clientId empty to run the
+   page in demo mode with sample entries.
+   ===================================================================== */
+window.PORTAL_CONFIG = {
+  // Application (client) ID from the Entra app registration
+  clientId: "a7e7369d-01db-485b-801c-cab4f4ea3558",
+  // Sign-in restricted to the Zululand Filters Microsoft 365 tenant.
+  authority: "https://login.microsoftonline.com/62bb6e84-a3b3-4d92-b480-002f0494e32d",
+  // Your Microsoft sign-in address. Only this account sees Upload / Delete.
+  ownerEmail: "Akhil@zululandfilters.co.za",
+  // Folder in YOUR OneDrive that holds everything (created on first upload)
+  rootFolder: "PowerBI Portal",
+  // OneDrive "share" link for the rootFolder (Share > Copy link).
+  // Colleagues read files through this link, so it must grant them access.
+  sharedFolderUrl: "",
+  // Operating-section tabs. Each becomes a sub-folder of rootFolder.
+  sections: [
+    { id: "sheq",        name: "SHEQ",        blurb: "Safety, health, environment and quality" },
+    { id: "admin",       name: "Admin",       blurb: "Finance, HR and administration" },
+    { id: "engineering", name: "Engineering", blurb: "Maintenance, reliability and projects" }
+  ],
+  portalName: "Operations Report Hub"
+};
+</script>
+<style>
+/* Layout: control-room header band, tab strip as section switcher, single list column of report rows */
+:root{
+  --bg:#f3f5f7; --surface:#ffffff; --ink:#15212b; --muted:#5b6872; --line:#d9dfe4;
+  --band:#17303f; --band-ink:#eef3f6; --accent:#e8a317; --accent-ink:#1d1400;
+  --link:#1f5f8b; --ok:#2f7d4f; --bad:#b3382c; --chip:#e7edf1;
+  --f-display:"IBM Plex Sans Condensed","Arial Narrow",Arial,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0f171d; --surface:#16222b; --ink:#e3eaef; --muted:#93a3ae; --line:#2a3a46;
+  --band:#0b1419; --band-ink:#e3eaef; --accent:#f0b43a; --accent-ink:#1d1400;
+  --link:#7fbbe3; --ok:#5fbf86; --bad:#e2766b; --chip:#22323d; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#0f171d; --surface:#16222b; --ink:#e3eaef; --muted:#93a3ae; --line:#2a3a46;
+  --band:#0b1419; --band-ink:#e3eaef; --accent:#f0b43a; --accent-ink:#1d1400;
+  --link:#7fbbe3; --ok:#5fbf86; --bad:#e2766b; --chip:#22323d; color-scheme:dark }
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--f-body)}
+.wrap{max-width:1040px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header.band{background:var(--band);color:var(--band-ink);border-bottom:4px solid var(--accent)}
+header .wrap{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding-block:18px}
+.brand{display:flex;flex-direction:column;gap:2px;min-width:0}
+.brand small{font:500 11px/1 var(--f-mono);letter-spacing:.14em;text-transform:uppercase;opacity:.7}
+.brand h1{margin:0;font:700 26px/1.1 var(--f-display);letter-spacing:.01em;text-wrap:balance}
+.who{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.who .acct{font:13px var(--f-mono);opacity:.85;overflow-wrap:anywhere}
+.role{font:600 11px/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;padding:5px 8px;border-radius:3px;background:var(--accent);color:var(--accent-ink)}
+.role.viewer{background:transparent;color:var(--band-ink);border:1px solid currentColor}
+button,.btn{font:600 14px var(--f-body);border-radius:4px;padding:8px 14px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+button:hover,.btn:hover{border-color:var(--link)}
+button:focus-visible,.btn:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+header button{background:transparent;color:var(--band-ink);border-color:rgba(255,255,255,.35)}
+header .btn-primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+nav.tabs{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+nav.tabs .wrap{display:flex;gap:4px;overflow-x:auto}
+nav.tabs a{font:600 15px/1 var(--f-display);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:16px 14px 13px;border-bottom:3px solid transparent;white-space:nowrap;display:flex;gap:8px;align-items:center}
+nav.tabs a[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+nav.tabs .n{font:500 11px/1 var(--f-mono);background:var(--chip);color:var(--muted);padding:3px 6px;border-radius:10px}
+main .wrap{padding-block:24px 48px;display:grid;gap:20px}
+.notice{border:1px solid var(--line);border-left:4px solid var(--accent);background:var(--surface);padding:12px 16px;border-radius:4px;font-size:14px}
+.notice b{font-family:var(--f-display);letter-spacing:.02em}
+.sec-head{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between}
+.sec-head h2{margin:0;font:700 30px/1.1 var(--f-display);text-wrap:balance}
+.sec-head p{margin:4px 0 0;color:var(--muted)}
+.path{font:12px var(--f-mono);color:var(--muted);overflow-wrap:anywhere}
+.tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.tools input[type=search]{font:14px var(--f-body);padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--surface);color:var(--ink);min-width:0;width:200px}
+.drop{border:2px dashed var(--line);border-radius:6px;padding:18px;text-align:center;color:var(--muted);background:var(--surface)}
+.drop.over{border-color:var(--accent);color:var(--ink)}
+.list{background:var(--surface);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.row{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:14px 16px;border-top:1px solid var(--line)}
+.row:first-child{border-top:0}
+.kind{font:600 11px/1 var(--f-mono);letter-spacing:.06em;width:58px;text-align:center;padding:8px 0;border-radius:3px;background:var(--chip);color:var(--ink)}
+.kind.link{background:var(--accent);color:var(--accent-ink)}
+.meta{min-width:0}
+.meta .t{font-weight:600;overflow-wrap:anywhere}
+.meta .s{font:12px var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.acts .btn,.acts button{padding:6px 10px;font-size:13px}
+.del{color:var(--bad)}
+.empty{padding:28px 16px;text-align:center;color:var(--muted)}
+.signin{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:28px;display:grid;gap:10px;justify-items:start}
+.signin h2{margin:0;font:700 24px var(--f-display)}
+.signin p{margin:0;color:var(--muted);max-width:60ch}
+dialog{border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);padding:20px;width:min(460px,calc(100vw - 32px))}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog form{display:grid;gap:12px}
+dialog label{display:grid;gap:4px;font-size:13px;font-weight:600}
+dialog input{font:14px var(--f-body);padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--ink)}
+dialog h3{margin:0;font:700 20px var(--f-display)}
+.dlg-acts{display:flex;gap:8px;justify-content:flex-end}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--band);color:var(--band-ink);padding:10px 16px;border-radius:4px;font-size:14px;z-index:20;max-width:calc(100vw - 32px)}
+.progress{height:4px;background:var(--chip);border-radius:2px;overflow:hidden}
+.progress i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
+footer{color:var(--muted);font-size:12px;text-align:center;padding-block:0 32px}
+@media (max-width:600px){
+  .row{grid-template-columns:auto 1fr}
+  .acts{grid-column:1/-1;justify-content:flex-start}
+  .tools input[type=search]{width:100%}
+  .tools{width:100%}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header class="band">
+  <div class="wrap">
+    <div class="brand"><small>Power BI · OneDrive</small><h1 id="portalName">Operations Report Hub</h1></div>
+    <div class="who" id="who"></div>
+  </div>
+</header>
+<nav class="tabs" aria-label="Operating sections"><div class="wrap" id="tabs" role="tablist"></div></nav>
+<main><div class="wrap" id="main"></div></main>
+<footer class="wrap">Files are stored in the owner's OneDrive. Opening a report may ask you to sign in to Power BI with your work account.</footer>
+
+<dialog id="linkDlg">
+  <form id="linkForm" method="dialog">
+    <h3>Add Power BI report link</h3>
+    <label for="lnkName">Report name<input id="lnkName" required placeholder="Monthly LTIFR dashboard"></label>
+    <label for="lnkUrl">Report URL (from app.powerbi.com)<input id="lnkUrl" type="url" required placeholder="https://app.powerbi.com/groups/.../reports/..."></label>
+    <div class="dlg-acts"><button type="button" id="lnkCancel">Cancel</button><button class="btn-primary" type="submit">Save link</button></div>
+  </form>
+</dialog>
+<dialog id="confirmDlg">
+  <form method="dialog"><h3>Delete file?</h3><p id="confirmText" style="margin:0"></p>
+    <div class="dlg-acts"><button value="no">Cancel</button><button value="yes" class="btn-primary">Delete</button></div></form>
+</dialog>
+<input type="file" id="fileInput" accept=".pbix,.pbit,.pbip,.xlsx,.pdf" multiple hidden>
+
+<script>
+(function(){
+const C = window.PORTAL_CONFIG;
+const DEMO = !C.clientId;
+const GRAPH = "https://graph.microsoft.com/v1.0";
+const READ_SCOPES = ["User.Read","Files.Read.All"];
+const WRITE_SCOPES = ["User.Read","Files.ReadWrite.All"];
+const LINK_EXT = ".pbireport.json";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+let msal = null, account = null, root = null; // root = {driveId, itemId}
+let current = C.sections[0].id, items = {}, filter = "";
+
+document.title = C.portalName; $("#portalName").textContent = C.portalName;
+const isOwner = () => DEMO || (account && C.ownerEmail && account.username.toLowerCase() === C.ownerEmail.toLowerCase());
+
+/* ---------- auth ---------- */
+async function initAuth(){
+  if (DEMO) return;
+  msal = new window.msal.PublicClientApplication({
+    auth:{ clientId:C.clientId, authority:C.authority, redirectUri: location.origin + location.pathname },
+    cache:{ cacheLocation:"localStorage" }
+  });
+  const res = await msal.handleRedirectPromise().catch(e => { toast(e.message); return null; });
+  account = res?.account || msal.getAllAccounts()[0] || null;
+}
+async function token(scopes){
+  try { return (await msal.acquireTokenSilent({ scopes, account })).accessToken; }
+  catch { return (await msal.acquireTokenPopup({ scopes, account })).accessToken; }
+}
+async function graph(path, opts = {}, write = false){
+  const t = await token(write ? WRITE_SCOPES : READ_SCOPES);
+  const r = await fetch(path.startsWith("http") ? path : GRAPH + path, { ...opts, headers:{ Authorization:"Bearer " + t, ...(opts.headers||{}) } });
+  if (r.status === 404) return null;
+  if (!r.ok){ const e = await r.json().catch(()=>({})); throw new Error(e.error?.message || ("Request failed (" + r.status + ")")); }
+  return r.status === 204 ? {} : r.json();
+}
+const shareId = url => "u!" + btoa(unescape(encodeURIComponent(url))).replace(/=+$/,"").replace(/\//g,"_").replace(/\+/g,"-");
+
+async function resolveRoot(){
+  if (root) return root;
+  if (C.sharedFolderUrl){
+    const it = await graph("/shares/" + shareId(C.sharedFolderUrl) + "/driveItem");
+    if (it){ root = { driveId: it.parentReference.driveId, itemId: it.id }; return root; }
+  }
+  if (isOwner()){
+    let it = await graph("/me/drive/root:/" + encodeURIComponent(C.rootFolder), {}, true);
+    if (!it){
+      it = await graph("/me/drive/root/children", { method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ name:C.rootFolder, folder:{}, "@microsoft.graph.conflictBehavior":"fail" }) }, true);
+    }
+    root = { driveId: it.parentReference.driveId, itemId: it.id }; return root;
+  }
+  throw new Error("The shared folder link is missing or you don't have access to it. Ask the portal owner to share the folder with you.");
+}
+const secPath = id => encodeURIComponent(C.sections.find(s=>s.id===id).name);
+
+/* ---------- data ---------- */
+async function load(sec){
+  if (DEMO){ items[sec] = demoItems(sec); return; }
+  const r = await resolveRoot();
+  const res = await graph(`/drives/${r.driveId}/items/${r.itemId}:/${secPath(sec)}:/children?$top=200&$select=id,name,size,webUrl,lastModifiedDateTime,lastModifiedBy,file,@microsoft.graph.downloadUrl`);
+  const list = (res?.value || []).filter(i => i.file);
+  await Promise.all(list.filter(i => i.name.endsWith(LINK_EXT)).map(async i => {
+    try { const j = await (await fetch(i["@microsoft.graph.downloadUrl"])).json(); i.reportUrl = j.url; i.title = j.name; } catch {}
+  }));
+  items[sec] = list.sort((a,b) => b.lastModifiedDateTime.localeCompare(a.lastModifiedDateTime));
+}
+async function uploadFile(file){
+  const r = await resolveRoot();
+  const base = `/drives/${r.driveId}/items/${r.itemId}:/${secPath(current)}/${encodeURIComponent(file.name)}:`;
+  const bar = progressBar(file.name);
+  if (file.size < 4*1024*1024){
+    await graph(base + "/content", { method:"PUT", body:file }, true); bar(1); return;
+  }
+  const s = await graph(base + "/createUploadSession", { method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ item:{ "@microsoft.graph.conflictBehavior":"replace" } }) }, true);
+  const CHUNK = 320*1024*12;
+  for (let start = 0; start < file.size; start += CHUNK){
+    const end = Math.min(start + CHUNK, file.size);
+    const resp = await fetch(s.uploadUrl, { method:"PUT", body:file.slice(start,end),
+      headers:{ "Content-Range":`bytes ${start}-${end-1}/${file.size}` } });
+    if (!resp.ok && resp.status !== 202) throw new Error("Upload of " + file.name + " stopped at " + Math.round(start/file.size*100) + "%.");
+    bar(end/file.size);
+  }
+}
+async function saveLink(name, url){
+  const r = await resolveRoot();
+  const fname = name.replace(/[\\/:*?"<>|#%]/g,"-") + LINK_EXT;
+  await graph(`/drives/${r.driveId}/items/${r.itemId}:/${secPath(current)}/${encodeURIComponent(fname)}:/content`,
+    { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, url }) }, true);
+}
+async function removeItem(it){
+  const r = await resolveRoot();
+  await graph(`/drives/${r.driveId}/items/${it.id}`, { method:"DELETE" }, true);
+}
+
+/* ---------- rendering ---------- */
+function renderWho(){
+  const w = $("#who");
+  if (DEMO){ w.innerHTML = `<span class="role">Demo mode</span>`; return; }
+  if (!account){ w.innerHTML = `<button class="btn-primary" id="inBtn">Sign in with Microsoft</button>`; $("#inBtn").onclick = signIn; return; }
+  w.innerHTML = `<span class="role ${isOwner()?"":"viewer"}">${isOwner()?"Owner":"Viewer"}</span><span class="acct">${esc(account.username)}</span><button id="outBtn">Sign out</button>`;
+  $("#outBtn").onclick = () => msal.logoutRedirect({ account });
+}
+function renderTabs(){
+  $("#tabs").innerHTML = C.sections.map(s => `<a href="#${s.id}" role="tab" aria-selected="${s.id===current}">${esc(s.name)}${items[s.id]?`<span class="n">${items[s.id].length}</span>`:""}</a>`).join("");
+}
+function kindOf(it){
+  if (it.reportUrl) return ["REPORT","link"];
+  const ext = it.name.split(".").pop().toUpperCase();
+  return [ext.slice(0,5), ""];
+}
+const fmtSize = b => b > 1048576 ? (b/1048576).toFixed(1) + " MB" : Math.max(1, Math.round(b/1024)) + " KB";
+const fmtDate = d => new Date(d).toLocaleDateString(undefined, { day:"2-digit", month:"short", year:"numeric" });
+
+function renderMain(){
+  const sec = C.sections.find(s => s.id === current);
+  const m = $("#main");
+  if (!DEMO && !account){
+    m.innerHTML = `<div class="signin"><h2>Sign in to view reports</h2><p>Use the same Microsoft account you use for Power BI. You'll only see sections the portal owner has shared with you.</p><button class="btn-primary" id="inBtn2">Sign in with Microsoft</button></div>`;
+    $("#inBtn2").onclick = signIn; return;
+  }
+  const list = (items[current] || []).filter(i => (i.title||i.name).toLowerCase().includes(filter));
+  const owner = isOwner();
+  m.innerHTML = `
+    ${DEMO ? `<div class="notice"><b>Demo mode.</b> These are sample entries. Add your Entra app ID and OneDrive details in the configuration block at the top of this file to go live (see README).</div>` : ""}
+    <div class="sec-head">
+      <div><h2>${esc(sec.name)}</h2><p>${esc(sec.blurb||"")}</p><div class="path">OneDrive › ${esc(C.rootFolder)} › ${esc(sec.name)}</div></div>
+      <div class="tools">
+        <input type="search" id="q" placeholder="Filter reports" aria-label="Filter reports" value="${esc(filter)}">
+        <button id="refresh">Refresh</button>
+        ${owner ? `<button id="addLink">Add report link</button><button class="btn-primary" id="upBtn">Upload files</button>` : ""}
+      </div>
+    </div>
+    ${owner ? `<div class="drop" id="drop">Drop .pbix files here to upload them to <b>${esc(sec.name)}</b><div id="bars" style="display:grid;gap:6px;margin-top:8px"></div></div>` : ""}
+    <div class="list">${ list.length ? list.map(rowHtml).join("") : `<div class="empty">${items[current] ? "No reports in this section yet." : "Loading…"}</div>` }</div>`;
+  $("#q").oninput = e => { filter = e.target.value.toLowerCase(); renderList(); };
+  $("#refresh").onclick = () => refresh(true);
+  if (owner){
+    $("#upBtn").onclick = () => $("#fileInput").click();
+    $("#addLink").onclick = () => { $("#linkForm").reset(); $("#linkDlg").showModal(); };
+    const d = $("#drop");
+    d.ondragover = e => { e.preventDefault(); d.classList.add("over"); };
+    d.ondragleave = () => d.classList.remove("over");
+    d.ondrop = e => { e.preventDefault(); d.classList.remove("over"); handleFiles(e.dataTransfer.files); };
+  }
+  bindRows();
+}
+function renderList(){
+  const list = (items[current] || []).filter(i => (i.title||i.name).toLowerCase().includes(filter));
+  document.querySelector(".list").innerHTML = list.length ? list.map(rowHtml).join("") : `<div class="empty">No reports match "${esc(filter)}".</div>`;
+  bindRows();
+}
+function rowHtml(it){
+  const [k, cls] = kindOf(it);
+  const who = it.lastModifiedBy?.user?.displayName || "";
+  const title = it.title || it.name;
+  const acts = it.reportUrl
+    ? `<a class="btn btn-primary" href="${esc(it.reportUrl)}" target="_blank" rel="noopener">Open in Power BI</a>`
+    : `<a class="btn btn-primary" href="${esc(it.webUrl)}" target="_blank" rel="noopener">Open</a>${it["@microsoft.graph.downloadUrl"]?`<a class="btn" href="${esc(it["@microsoft.graph.downloadUrl"])}">Download</a>`:""}`;
+  return `<div class="row" data-id="${esc(it.id)}"><span class="kind ${cls}">${esc(k)}</span>
+    <div class="meta"><div class="t">${esc(title)}</div><div class="s">${it.reportUrl ? "app.powerbi.com" : fmtSize(it.size)} · ${fmtDate(it.lastModifiedDateTime)}${who?" · "+esc(who):""}</div></div>
+    <div class="acts">${acts}${isOwner()?`<button class="del" data-del="${esc(it.id)}">Delete</button>`:""}</div></div>`;
+}
+function bindRows(){
+  document.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+    const it = items[current].find(i => i.id === b.dataset.del);
+    $("#confirmText").textContent = `"${it.title||it.name}" will be moved to the OneDrive recycle bin.`;
+    $("#confirmDlg").returnValue = ""; $("#confirmDlg").showModal();
+    $("#confirmDlg").onclose = async () => {
+      if ($("#confirmDlg").returnValue !== "yes") return;
+      if (DEMO){ items[current] = items[current].filter(i=>i!==it); renderTabs(); renderList(); toast("Deleted (demo)"); return; }
+      try { await removeItem(it); toast("Deleted"); refresh(true); } catch(e){ toast(e.message); }
+    };
+  });
+}
+function progressBar(name){
+  const box = $("#bars"); if (!box) return ()=>{};
+  const el = document.createElement("div");
+  el.innerHTML = `<div style="font:12px var(--f-mono);text-align:left">${esc(name)}</div><div class="progress"><i></i></div>`;
+  box.appendChild(el);
+  return f => { el.querySelector("i").style.width = Math.round(f*100) + "%"; if (f >= 1) setTimeout(()=>el.remove(), 1500); };
+}
+let toastT;
+function toast(msg){
+  let t = $(".toast"); if (!t){ t = document.createElement("div"); t.className = "toast"; t.setAttribute("role","status"); document.body.appendChild(t); }
+  t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(()=> t.hidden = true, 4000);
+}
+
+/* ---------- actions ---------- */
+async function signIn(){ await msal.loginRedirect({ scopes: READ_SCOPES }); }
+async function handleFiles(files){
+  if (!files?.length) return;
+  if (DEMO){
+    [...files].forEach(f => items[current].unshift({ id:"d"+Math.random(), name:f.name, size:f.size, webUrl:"#", lastModifiedDateTime:new Date().toISOString(), lastModifiedBy:{user:{displayName:"You"}} }));
+    renderTabs(); renderList(); toast("Added to list (demo — nothing uploaded)"); return;
+  }
+  for (const f of files){ try { await uploadFile(f); } catch(e){ toast(e.message); } }
+  toast(files.length + (files.length>1?" files":" file") + " uploaded to " + C.sections.find(s=>s.id===current).name);
+  refresh(true);
+}
+$("#fileInput").onchange = e => { handleFiles(e.target.files); e.target.value = ""; };
+$("#lnkCancel").onclick = () => $("#linkDlg").close();
+$("#linkForm").onsubmit = async e => {
+  e.preventDefault();
+  const name = $("#lnkName").value.trim(), url = $("#lnkUrl").value.trim();
+  $("#linkDlg").close();
+  if (DEMO){ items[current].unshift({ id:"d"+Math.random(), name:name+LINK_EXT, title:name, reportUrl:url, lastModifiedDateTime:new Date().toISOString(), lastModifiedBy:{user:{displayName:"You"}} }); renderTabs(); renderList(); toast("Link added (demo)"); return; }
+  try { await saveLink(name, url); toast("Link saved"); refresh(true); } catch(err){ toast(err.message); }
+};
+
+async function refresh(force){
+  if (!DEMO && !account){ renderTabs(); renderMain(); return; }
+  if (force) delete items[current];
+  renderTabs(); renderMain();
+  try { if (!items[current]) await load(current); }
+  catch(e){ items[current] = []; toast(e.message); }
+  renderTabs(); renderMain();
+}
+function fromHash(){
+  const h = location.hash.slice(1);
+  if (C.sections.some(s=>s.id===h)) current = h;
+  filter = ""; refresh(false);
+}
+window.addEventListener("hashchange", fromHash);
+
+/* ---------- demo data ---------- */
+function demoItems(sec){
+  const d = (n) => new Date(Date.now() - n*864e5).toISOString();
+  const S = {
+    sheq:[["Incident & LTIFR Tracker.pbix",18.4e6,2,"Thandi M."],["Monthly Safety Pack Oct 2026",0,1,"Thandi M.","https://app.powerbi.com/"],["Environmental Permits Register.pbix",6.2e6,9,"Sipho N."],["ISO 9001 Audit Findings.pbix",3.1e6,21,"Thandi M."]],
+    admin:[["Headcount & Overtime.pbix",9.7e6,3,"Priya R."],["Budget vs Actual FY27",0,5,"Priya R.","https://app.powerbi.com/"],["Fleet Cost Summary.pbix",4.4e6,14,"Johan V."]],
+    engineering:[["Planned Maintenance Compliance.pbix",22.9e6,1,"Johan V."],["Asset Downtime (MTBF-MTTR).pbix",15.3e6,6,"Lerato K."],["Capex Project Tracker",0,11,"Lerato K.","https://app.powerbi.com/"]]
+  };
+  return (S[sec]||[]).map((r,i)=>({ id:sec+i, name:r[4]?r[0]+LINK_EXT:r[0], title:r[4]?r[0]:null, reportUrl:r[4]||null, size:r[1], webUrl:"#", lastModifiedDateTime:d(r[2]), lastModifiedBy:{user:{displayName:r[3]}} }));
+}
+
+/* ---------- boot ---------- */
+(async () => {
+  try { await initAuth(); } catch(e){ toast("Sign-in setup failed: " + e.message); }
+  renderWho();
+  if (DEMO) C.sections.forEach(s => items[s.id] = demoItems(s.id));
+  fromHash();
+})();
+})();
+</script>
+</body>
+</html>
