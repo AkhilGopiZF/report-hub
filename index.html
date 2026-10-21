@@ -5,165 +5,376 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Operations Report Hub</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.3/lib/msal-browser.min.js"></script>
 <script>
 /* =====================================================================
-   CONFIGURATION — edit these values after registering the app in
-   Microsoft Entra (see README.md). Leave clientId empty to run the
-   page in demo mode with sample entries.
+   CONFIGURATION — see README.md for the setup steps.
+   Leave clientId empty to run the page in demo mode with sample entries.
    ===================================================================== */
 window.PORTAL_CONFIG = {
   // Application (client) ID from the Entra app registration
   clientId: "a7e7369d-01db-485b-801c-cab4f4ea3558",
   // Sign-in restricted to the Zululand Filters Microsoft 365 tenant.
   authority: "https://login.microsoftonline.com/62bb6e84-a3b3-4d92-b480-002f0494e32d",
-  // Your Microsoft sign-in address. Only this account sees Upload / Delete.
+  // Portal owner. Their OneDrive holds the shared index folder.
   ownerEmail: "Akhil@zululandfilters.co.za",
-  // Folder in YOUR OneDrive that holds everything (created on first upload)
-  rootFolder: "PowerBI Portal",
-  // OneDrive "share" link for the rootFolder (Share > Copy link).
-  // Colleagues read files through this link, so it must grant them access.
-  sharedFolderUrl: "",
-  // Operating-section tabs. Each becomes a sub-folder of rootFolder.
+  // Folder created in EACH uploader's own OneDrive to hold their uploads.
+  // It is never shared as a whole; each file is shared individually.
+  filesFolder: "PowerBI Portal",
+  // Folder in the owner's OneDrive that lists which files exist (IDs only,
+  // no file names). Created automatically the first time the owner signs in.
+  indexFolderName: "PowerBI Portal Index",
+  // Share link for the index folder: Share > "People in Zululand Filters" > "Can edit" > Copy link.
+  indexFolderUrl: "",
+  // Only these email domains can be given access to a file.
+  allowedDomains: ["zululandfilters.co.za"],
+  // Operating-section tabs. Each becomes a sub-folder.
+  // icon: one of shield, briefcase, wrench, chart, box, truck, users
   sections: [
-    { id: "sheq",        name: "SHEQ",        blurb: "Safety, health, environment and quality" },
-    { id: "admin",       name: "Admin",       blurb: "Finance, HR and administration" },
-    { id: "engineering", name: "Engineering", blurb: "Maintenance, reliability and projects" }
+    { id: "sheq",        name: "SHEQ",        icon: "shield",    blurb: "Safety, health, environment and quality" },
+    { id: "admin",       name: "Admin",       icon: "briefcase", blurb: "Finance, HR and administration" },
+    { id: "engineering", name: "Engineering", icon: "wrench",    blurb: "Maintenance, reliability and projects" }
   ],
   portalName: "Operations Report Hub"
 };
 </script>
 <style>
-/* Layout: control-room header band, tab strip as section switcher, single list column of report rows */
+/* Layout: slim app bar with profile menu, segmented section switcher, one file table per section */
 :root{
-  --bg:#f3f5f7; --surface:#ffffff; --ink:#15212b; --muted:#5b6872; --line:#d9dfe4;
-  --band:#17303f; --band-ink:#eef3f6; --accent:#e8a317; --accent-ink:#1d1400;
-  --link:#1f5f8b; --ok:#2f7d4f; --bad:#b3382c; --chip:#e7edf1;
+  --bg:#f4f6f8; --surface:#ffffff; --sunken:#eef1f4; --ink:#16222c; --muted:#5f6c76; --line:#e1e6ea;
+  --primary:#1d4e6e; --primary-ink:#ffffff; --accent:#e8a317; --focus:#e8a317;
+  --bad:#b3382c;
+  --c-bi:#b67d00; --c-pdf:#c0392b; --c-xls:#1e7b48; --c-link:#2368a2; --c-doc:#2b579a; --c-other:#5f6c76;
+  --shadow:0 1px 2px rgba(22,34,44,.06),0 8px 24px rgba(22,34,44,.08);
   --f-display:"IBM Plex Sans Condensed","Arial Narrow",Arial,sans-serif;
   --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
 }
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
-  --bg:#0f171d; --surface:#16222b; --ink:#e3eaef; --muted:#93a3ae; --line:#2a3a46;
-  --band:#0b1419; --band-ink:#e3eaef; --accent:#f0b43a; --accent-ink:#1d1400;
-  --link:#7fbbe3; --ok:#5fbf86; --bad:#e2766b; --chip:#22323d; color-scheme:dark }}
+  --bg:#0e151b; --surface:#151f27; --sunken:#1b2731; --ink:#e3eaef; --muted:#93a3ae; --line:#26343f;
+  --primary:#8cc4ea; --primary-ink:#0b1419; --accent:#f0b43a; --focus:#f0b43a; --bad:#ef8b80;
+  --c-bi:#f0b43a; --c-pdf:#ef8b80; --c-xls:#6fcf97; --c-link:#8cc4ea; --c-doc:#9db8ec; --c-other:#93a3ae;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.35); color-scheme:dark }}
 :root[data-theme="dark"]{
-  --bg:#0f171d; --surface:#16222b; --ink:#e3eaef; --muted:#93a3ae; --line:#2a3a46;
-  --band:#0b1419; --band-ink:#e3eaef; --accent:#f0b43a; --accent-ink:#1d1400;
-  --link:#7fbbe3; --ok:#5fbf86; --bad:#e2766b; --chip:#22323d; color-scheme:dark }
+  --bg:#0e151b; --surface:#151f27; --sunken:#1b2731; --ink:#e3eaef; --muted:#93a3ae; --line:#26343f;
+  --primary:#8cc4ea; --primary-ink:#0b1419; --accent:#f0b43a; --focus:#f0b43a; --bad:#ef8b80;
+  --c-bi:#f0b43a; --c-pdf:#ef8b80; --c-xls:#6fcf97; --c-link:#8cc4ea; --c-doc:#9db8ec; --c-other:#93a3ae;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.35); color-scheme:dark }
+
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--f-body)}
-.wrap{max-width:1040px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
-header.band{background:var(--band);color:var(--band-ink);border-bottom:4px solid var(--accent)}
-header .wrap{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding-block:18px}
-.brand{display:flex;flex-direction:column;gap:2px;min-width:0}
-.brand small{font:500 11px/1 var(--f-mono);letter-spacing:.14em;text-transform:uppercase;opacity:.7}
-.brand h1{margin:0;font:700 26px/1.1 var(--f-display);letter-spacing:.01em;text-wrap:balance}
-.who{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.who .acct{font:13px var(--f-mono);opacity:.85;overflow-wrap:anywhere}
-.role{font:600 11px/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;padding:5px 8px;border-radius:3px;background:var(--accent);color:var(--accent-ink)}
-.role.viewer{background:transparent;color:var(--band-ink);border:1px solid currentColor}
-button,.btn{font:600 14px var(--f-body);border-radius:4px;padding:8px 14px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
-button:hover,.btn:hover{border-color:var(--link)}
-button:focus-visible,.btn:focus-visible,a:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
-.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
-header button{background:transparent;color:var(--band-ink);border-color:rgba(255,255,255,.35)}
-header .btn-primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-nav.tabs{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
-nav.tabs .wrap{display:flex;gap:4px;overflow-x:auto}
-nav.tabs a{font:600 15px/1 var(--f-display);letter-spacing:.04em;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:16px 14px 13px;border-bottom:3px solid transparent;white-space:nowrap;display:flex;gap:8px;align-items:center}
-nav.tabs a[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
-nav.tabs .n{font:500 11px/1 var(--f-mono);background:var(--chip);color:var(--muted);padding:3px 6px;border-radius:10px}
-main .wrap{padding-block:24px 48px;display:grid;gap:20px}
-.notice{border:1px solid var(--line);border-left:4px solid var(--accent);background:var(--surface);padding:12px 16px;border-radius:4px;font-size:14px}
-.notice b{font-family:var(--f-display);letter-spacing:.02em}
-.sec-head{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between}
-.sec-head h2{margin:0;font:700 30px/1.1 var(--f-display);text-wrap:balance}
-.sec-head p{margin:4px 0 0;color:var(--muted)}
-.path{font:12px var(--f-mono);color:var(--muted);overflow-wrap:anywhere}
-.tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.tools input[type=search]{font:14px var(--f-body);padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--surface);color:var(--ink);min-width:0;width:200px}
-.drop{border:2px dashed var(--line);border-radius:6px;padding:18px;text-align:center;color:var(--muted);background:var(--surface)}
-.drop.over{border-color:var(--accent);color:var(--ink)}
-.list{background:var(--surface);border:1px solid var(--line);border-radius:6px;overflow:hidden}
-.row{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:14px 16px;border-top:1px solid var(--line)}
-.row:first-child{border-top:0}
-.kind{font:600 11px/1 var(--f-mono);letter-spacing:.06em;width:58px;text-align:center;padding:8px 0;border-radius:3px;background:var(--chip);color:var(--ink)}
-.kind.link{background:var(--accent);color:var(--accent-ink)}
-.meta{min-width:0}
-.meta .t{font-weight:600;overflow-wrap:anywhere}
-.meta .s{font:12px var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
-.acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
-.acts .btn,.acts button{padding:6px 10px;font-size:13px}
-.del{color:var(--bad)}
-.empty{padding:28px 16px;text-align:center;color:var(--muted)}
-.signin{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:28px;display:grid;gap:10px;justify-items:start}
-.signin h2{margin:0;font:700 24px var(--f-display)}
-.signin p{margin:0;color:var(--muted);max-width:60ch}
-dialog{border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);padding:20px;width:min(460px,calc(100vw - 32px))}
-dialog::backdrop{background:rgba(0,0,0,.45)}
-dialog form{display:grid;gap:12px}
-dialog label{display:grid;gap:4px;font-size:13px;font-weight:600}
-dialog input{font:14px var(--f-body);padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--ink)}
-dialog h3{margin:0;font:700 20px var(--f-display)}
-.dlg-acts{display:flex;gap:8px;justify-content:flex-end}
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--band);color:var(--band-ink);padding:10px 16px;border-radius:4px;font-size:14px;z-index:20;max-width:calc(100vw - 32px)}
-.progress{height:4px;background:var(--chip);border-radius:2px;overflow:hidden}
-.progress i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 var(--f-body);-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+.wrap{max-width:1080px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+svg.i{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---- buttons ---- */
+button,.btn{font:600 14px/1 var(--f-body);border-radius:8px;padding:9px 14px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;transition:background .15s,border-color .15s}
+button:hover,.btn:hover{border-color:var(--muted)}
+button:disabled{opacity:.6;cursor:progress}
+:is(button,.btn,a,input,select,summary):focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.btn-primary{background:var(--primary);border-color:var(--primary);color:var(--primary-ink)}
+.btn-primary:hover{border-color:var(--primary);filter:brightness(1.08)}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--muted)}
+.btn-ghost:hover{background:var(--sunken);border-color:transparent;color:var(--ink)}
+.icon-btn{padding:8px;width:36px;height:36px}
+.btn-danger:hover{color:var(--bad);background:color-mix(in srgb,var(--bad) 10%,transparent)}
+.btn-ms{background:var(--surface);color:var(--ink);border-color:var(--line);padding:11px 18px;font-size:15px}
+
+/* ---- app bar ---- */
+.appbar{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:env(safe-area-inset-top,0px);z-index:8}
+.appbar .wrap{display:flex;align-items:center;justify-content:space-between;gap:12px;height:64px}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.mark{width:36px;height:36px;border-radius:9px;background:var(--accent);display:grid;place-items:center;flex:none}
+.mark svg{width:20px;height:20px;stroke:#1d1400;stroke-width:2.2}
+.brand-text{min-width:0}
+.brand-text h1{margin:0;font:700 19px/1.15 var(--f-display);letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brand-text small{display:block;font:500 11px/1.3 var(--f-mono);color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+
+/* ---- avatars & profile ---- */
+.avatar{position:relative;width:36px;height:36px;border-radius:50%;flex:none;display:grid;place-items:center;font:600 13px/1 var(--f-body);color:#fff;background:var(--av,#1d4e6e)}
+.avatar img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block}
+.avatar.lg{width:56px;height:56px;font-size:19px}
+.avatar.sm{width:22px;height:22px;font-size:9.5px}
+.ms-badge{position:absolute;right:-3px;bottom:-3px;width:16px;height:16px;border-radius:4px;background:var(--surface);display:grid;place-items:center;box-shadow:0 0 0 1.5px var(--surface)}
+.ms-badge svg,.ms-logo{width:11px;height:11px;display:block}
+.avatar.lg .ms-badge{width:20px;height:20px}.avatar.lg .ms-badge svg{width:14px;height:14px}
+.profile{position:relative}
+.prof-btn{padding:4px 10px 4px 4px;border-radius:999px;gap:10px;border-color:var(--line)}
+.prof-btn .who{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;min-width:0}
+.prof-btn .who b{font:600 14px/1 var(--f-body);max-width:16ch;overflow:hidden;text-overflow:ellipsis}
+.prof-btn .who small{font:500 11px/1 var(--f-body);color:var(--muted)}
+.prof-btn .chev{width:16px;height:16px;color:var(--muted)}
+.menu{position:absolute;right:0;top:calc(100% + 8px);width:min(300px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:16px;display:grid;gap:14px;z-index:9}
+.menu .id{display:flex;gap:12px;align-items:center;min-width:0}
+.menu .id div{min-width:0}
+.menu .id b{display:block;font-size:15px;overflow-wrap:anywhere}
+.menu .id div>span{display:block;font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.menu .facts{display:grid;gap:8px;padding:12px;border-radius:8px;background:var(--sunken);font-size:13px}
+.menu .facts div{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.menu .facts span{color:var(--muted)}
+.menu .facts b{display:inline-flex;align-items:center;gap:6px;font-weight:600}
+.chip{font:600 11px/1 var(--f-body);letter-spacing:.03em;padding:4px 8px;border-radius:999px;background:color-mix(in srgb,var(--accent) 22%,transparent);color:var(--ink)}
+.chip.viewer{background:var(--sunken);color:var(--muted);border:1px solid var(--line)}
+.menu .btn{width:100%}
+
+/* ---- section switcher ---- */
+.sections{padding-block:20px 4px}
+.seg{display:flex;gap:6px;padding:5px;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow-x:auto;width:max-content;max-width:100%}
+.seg a{display:flex;align-items:center;gap:8px;padding:9px 14px;border-radius:8px;color:var(--muted);text-decoration:none;font:600 14px/1 var(--f-body);white-space:nowrap}
+.seg a:hover{color:var(--ink);background:var(--sunken)}
+.seg a[aria-selected="true"]{background:var(--primary);color:var(--primary-ink)}
+.seg .n{font:500 11px/1 var(--f-mono);padding:3px 7px;border-radius:999px;background:var(--sunken);color:var(--muted)}
+.seg a[aria-selected="true"] .n{background:color-mix(in srgb,var(--primary-ink) 20%,transparent);color:var(--primary-ink)}
+
+/* ---- section content ---- */
+main .wrap{padding-block:16px 48px;display:grid;gap:16px}
+.notice{display:flex;gap:10px;align-items:flex-start;border:1px solid color-mix(in srgb,var(--accent) 50%,var(--line));background:color-mix(in srgb,var(--accent) 10%,var(--surface));padding:12px 14px;border-radius:10px;font-size:14px}
+.notice svg{color:var(--c-bi);margin-top:2px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.panel-head{display:flex;flex-wrap:wrap;gap:16px;align-items:center;justify-content:space-between;padding:20px 20px 16px}
+.panel-head h2{margin:0;font:700 26px/1.1 var(--f-display);text-wrap:balance}
+.panel-head p{margin:4px 0 0;color:var(--muted);font-size:14px}
+.crumb{display:flex;align-items:center;gap:6px;margin-top:8px;font:12px var(--f-mono);color:var(--muted);overflow-wrap:anywhere}
+.crumb svg{width:14px;height:14px}
+.head-acts{display:flex;gap:8px;flex-wrap:wrap}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 20px;border-top:1px solid var(--line);background:var(--sunken)}
+.search{position:relative;flex:1 1 240px;min-width:0}
+.search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted);width:16px;height:16px}
+.search input{width:100%;font:14px var(--f-body);padding:9px 12px 9px 34px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
+.toolbar select{font:14px var(--f-body);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
+.toolbar label.lbl{font-size:13px;color:var(--muted)}
+
+/* ---- drop zone ---- */
+.drop{margin:16px 20px 0;border:1.5px dashed var(--line);border-radius:10px;padding:14px 16px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;color:var(--muted);font-size:14px;text-align:center;transition:background .15s,border-color .15s}
+.drop.over{border-color:var(--primary);background:color-mix(in srgb,var(--primary) 7%,transparent);color:var(--ink)}
+.drop .link{background:none;border:0;padding:0;color:var(--primary);font:600 14px var(--f-body);text-decoration:underline;text-underline-offset:3px}
+#bars{display:grid;gap:8px;margin:12px 20px 0}
+#bars:empty{display:none}
+.bar-row{display:grid;gap:4px;font:12px var(--f-mono);color:var(--muted)}
+.progress{height:4px;background:var(--sunken);border-radius:2px;overflow:hidden}
+.progress i{display:block;height:100%;background:var(--primary);width:0;transition:width .2s}
+
+/* ---- file table ---- */
+.table{padding:8px 0 4px}
+.thead,.row{display:grid;grid-template-columns:44px minmax(0,1fr) 200px 220px;gap:14px;align-items:center;padding:10px 20px}
+.thead{font:600 11px/1 var(--f-body);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding-block:12px 8px}
+.thead span:last-child{text-align:right}
+.row{border-top:1px solid var(--line);padding-block:12px}
+.row:hover{background:color-mix(in srgb,var(--sunken) 60%,transparent)}
+.ftype{width:44px;height:44px;border-radius:10px;display:grid;place-items:center;gap:0;color:var(--c);background:color-mix(in srgb,var(--c) 13%,transparent)}
+.ftype svg{width:20px;height:20px}
+.ftype em{font:600 8.5px/1 var(--f-mono);font-style:normal;letter-spacing:.04em;margin-top:-6px}
+.name{min-width:0}
+.name .t{font-weight:600;overflow-wrap:anywhere;line-height:1.35}
+.name .s{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.upd{display:flex;align-items:center;gap:10px;min-width:0;font-size:13px}
+.upd div{min-width:0}
+.upd b{display:block;font-weight:500;font-variant-numeric:tabular-nums}
+.upd div>span{display:block;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acts{display:flex;gap:6px;justify-content:flex-end;align-items:center}
+.acts .btn,.acts button{padding:8px 12px;font-size:13px}
+.acts .icon-btn{padding:7px;width:34px;height:34px}
+.empty{padding:40px 20px 44px;text-align:center;color:var(--muted);display:grid;justify-items:center;gap:8px;border-top:1px solid var(--line)}
+.empty .big{width:52px;height:52px;border-radius:14px;background:var(--sunken);display:grid;place-items:center}
+.empty .big svg{width:24px;height:24px}
+.empty b{color:var(--ink);font-size:15px}
+.skel{height:12px;border-radius:6px;background:var(--sunken)}
+.row.loading .ftype{background:var(--sunken)}
+@media (prefers-reduced-motion:no-preference){.skel,.row.loading .ftype{animation:pulse 1.2s ease-in-out infinite}}
+@keyframes pulse{50%{opacity:.5}}
+
+/* ---- sign-in ---- */
+.signin{max-width:440px;margin:48px auto;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:32px;display:grid;gap:14px;justify-items:center;text-align:center;box-shadow:var(--shadow)}
+.signin .mark{width:52px;height:52px;border-radius:13px}
+.signin .mark svg{width:28px;height:28px}
+.signin h2{margin:4px 0 0;font:700 24px/1.15 var(--f-display)}
+.signin p{margin:0;color:var(--muted);font-size:14px;max-width:44ch}
+
+/* ---- dialogs, toast ---- */
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);padding:22px;width:min(460px,calc(100vw - 32px));box-shadow:var(--shadow)}
+dialog::backdrop{background:rgba(10,16,22,.5)}
+dialog form{display:grid;gap:14px}
+dialog label{display:grid;gap:6px;font-size:13px;font-weight:600}
+dialog input{font:14px var(--f-body);padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+dialog h3{margin:0;font:700 20px/1.2 var(--f-display)}
+dialog p{margin:0;color:var(--muted);font-size:14px}
+.dlg-acts{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.btn-bad{background:var(--bad);border-color:var(--bad);color:#fff}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:11px 16px;border-radius:10px;font-size:14px;z-index:20;max-width:calc(100vw - 32px);box-shadow:var(--shadow)}
 footer{color:var(--muted);font-size:12px;text-align:center;padding-block:0 32px}
-@media (max-width:600px){
-  .row{grid-template-columns:auto 1fr}
-  .acts{grid-column:1/-1;justify-content:flex-start}
-  .tools input[type=search]{width:100%}
-  .tools{width:100%}
+
+@media (max-width:760px){
+  .thead{display:none}
+  .row{grid-template-columns:44px minmax(0,1fr);row-gap:10px}
+  .upd,.acts{grid-column:2}
+  .acts{justify-content:flex-start;flex-wrap:wrap}
+  .prof-btn .who,.prof-btn .chev{display:none}
+  .prof-btn{padding:3px}
+  .brand-text small{display:none}
+  .panel-head,.toolbar{padding-left:16px;padding-right:16px}
+  .thead,.row{padding-left:16px;padding-right:16px}
+  .drop{margin-inline:16px}
+  .head-acts{width:100%}
+  .toolbar label.lbl{display:none}
+  .head-acts .btn,.head-acts button{flex:1}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* ---- access ---- */
+.acc{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.acc svg{width:13px;height:13px}
+.acc.private{color:var(--muted)}
+.acc.shared{color:var(--c-link)}
+.from{color:var(--ink)}
+#accessDlg{width:min(580px,calc(100vw - 32px))}
+.dlg-head{display:flex;gap:12px;align-items:flex-start}
+.dlg-head .ftype{flex:none}
+.dlg-head div{min-width:0}
+.dlg-head p{overflow-wrap:anywhere}
+.add-row{display:flex;gap:8px;flex-wrap:wrap}
+.add-row input{flex:1 1 240px;min-width:0}
+dialog select{font:14px var(--f-body);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+.check{display:flex!important;grid-template-columns:none;align-items:center;gap:8px;font-weight:500!important;color:var(--muted)}
+.check input{width:16px;height:16px;padding:0}
+.plist{border:1px solid var(--line);border-radius:10px;max-height:300px;overflow:auto}
+.plist-h{font:600 11px/1 var(--f-body);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.prow{display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line)}
+.prow:first-child{border-top:0}
+.prow .pm{flex:1;min-width:0}
+.prow .pm b{display:block;font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.prow .pm span{display:block;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.prow .fixed{font-size:13px;color:var(--muted);padding-inline:6px}
+.prow select{padding:6px 8px;font-size:13px}
+.prow .icon-btn{width:32px;height:32px;padding:6px}
+.err{color:var(--bad);font-size:13px;margin:0}
+.hint{font-size:12px;color:var(--muted);margin:0}
+.toolbar .seg-sm{display:flex;gap:2px;padding:3px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.toolbar .seg-sm button{border:0;padding:6px 10px;font-size:13px;border-radius:6px;background:transparent;color:var(--muted)}
+.toolbar .seg-sm button[aria-pressed="true"]{background:var(--sunken);color:var(--ink)}
+@media (max-width:760px){ .toolbar .seg-sm{order:3} }
+
+.field{display:grid;gap:6px}.field>label{font-size:13px;font-weight:600}
 </style>
 </head>
 <body>
-<header class="band">
+<header class="appbar">
   <div class="wrap">
-    <div class="brand"><small>Power BI · OneDrive</small><h1 id="portalName">Operations Report Hub</h1></div>
-    <div class="who" id="who"></div>
+    <div class="brand">
+      <span class="mark" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="M6 20V11M12 20V5M18 20v-6"/></svg></span>
+      <div class="brand-text"><h1 id="portalName">Operations Report Hub</h1><small>Power BI reports · OneDrive</small></div>
+    </div>
+    <div class="profile" id="profile"></div>
   </div>
 </header>
-<nav class="tabs" aria-label="Operating sections"><div class="wrap" id="tabs" role="tablist"></div></nav>
+<nav class="sections wrap" aria-label="Operating sections"><div class="seg" id="tabs" role="tablist"></div></nav>
 <main><div class="wrap" id="main"></div></main>
-<footer class="wrap">Reports open in Power BI on the web and need a Power BI Pro, Premium Per User or E5 licence. The first open of a new file takes a little longer.</footer>
+<footer class="wrap">Each file is stored in its uploader's OneDrive and shown only to the people it's shared with.</footer>
 
 <dialog id="linkDlg">
   <form id="linkForm" method="dialog">
     <h3>Add Power BI report link</h3>
+    <p>For reports already published to app.powerbi.com. You'll choose who can see the link next.</p>
     <label for="lnkName">Report name<input id="lnkName" required placeholder="Monthly LTIFR dashboard"></label>
-    <label for="lnkUrl">Report URL (from app.powerbi.com)<input id="lnkUrl" type="url" required placeholder="https://app.powerbi.com/groups/.../reports/..."></label>
+    <label for="lnkUrl">Report URL<input id="lnkUrl" type="url" required placeholder="https://app.powerbi.com/groups/.../reports/..."></label>
     <div class="dlg-acts"><button type="button" id="lnkCancel">Cancel</button><button class="btn-primary" type="submit">Save link</button></div>
   </form>
 </dialog>
 <dialog id="confirmDlg">
-  <form method="dialog"><h3>Delete file?</h3><p id="confirmText" style="margin:0"></p>
-    <div class="dlg-acts"><button value="no">Cancel</button><button value="yes" class="btn-primary">Delete</button></div></form>
+  <form method="dialog"><h3>Delete file?</h3><p id="confirmText"></p>
+    <div class="dlg-acts"><button value="no">Cancel</button><button value="yes" class="btn-bad">Delete</button></div></form>
 </dialog>
-<input type="file" id="fileInput" accept=".pbix,.xlsx,.pdf" multiple hidden>
+<dialog id="replaceDlg">
+  <form method="dialog"><h3>Replace existing file?</h3><p id="replaceText"></p>
+    <div class="dlg-acts"><button value="skip">Keep existing</button><button value="replace" class="btn-primary">Replace</button></div></form>
+</dialog>
+<dialog id="accessDlg" aria-labelledby="accTitle">
+  <form method="dialog" id="accForm">
+    <div class="dlg-head"><span class="ftype" id="accIcon"></span><div><h3 id="accTitle">Manage access</h3><p id="accFile"></p></div></div>
+    <p id="accIntro" class="hint"></p>
+    <div class="field"><label for="accEmails">Add people by email</label>
+      <div class="add-row">
+        <input id="accEmails" type="text" inputmode="email" autocomplete="off" placeholder="name@zululandfilters.co.za, another@…">
+        <select id="accRole" aria-label="Permission"><option value="read">Can view</option><option value="write">Can edit</option></select>
+        <button type="button" class="btn-primary" id="accAdd">Add</button>
+      </div>
+    </div>
+    <label class="check" for="accNotify"><input type="checkbox" id="accNotify" checked>Email them a link to the file</label>
+    <p class="err" id="accErr" hidden></p>
+    <div class="plist-h">People with access</div>
+    <div class="plist" id="accList"></div>
+    <p class="hint">Can view: see and download. Can edit: also replace the file with a new version. Only you can change who has access.</p>
+    <div class="dlg-acts"><button value="done" class="btn-primary">Done</button></div>
+  </form>
+</dialog>
+<input type="file" id="fileInput" accept=".pbix,.pbip,.pbit,.xlsx,.xlsm,.csv,.pdf,.docx,.pptx" multiple hidden>
+<input type="file" id="verInput" hidden>
 
 <script>
 (function(){
 const C = window.PORTAL_CONFIG;
 const DEMO = !C.clientId;
 const GRAPH = "https://graph.microsoft.com/v1.0";
-const READ_SCOPES = ["User.Read","Files.Read.All"];
-const WRITE_SCOPES = ["User.Read","Files.ReadWrite.All"];
+const SCOPES = ["User.Read","Files.ReadWrite.All"];
 const LINK_EXT = ".pbireport.json";
+const SEL = "id,name,size,webUrl,lastModifiedDateTime,lastModifiedBy,createdBy,file,parentReference,@microsoft.graph.downloadUrl";
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const enc = encodeURIComponent;
 
-let msal = null, account = null, root = null; // root = {driveId, itemId}
-let current = C.sections[0].id, items = {}, filter = "";
+let msal = null, account = null;
+let index = null;      // shared index folder {driveId, itemId}
+let myDriveId = null;  // signed-in user's OneDrive
+let me = null;         // { name, email, job, photo }
+let current = C.sections[0].id, items = {}, filter = "", sort = "new", scope = "all", menuOpen = false;
 
 document.title = C.portalName; $("#portalName").textContent = C.portalName;
+const myEmail = () => (me?.email || account?.username || "").toLowerCase();
 const isOwner = () => DEMO || (account && C.ownerEmail && account.username.toLowerCase() === C.ownerEmail.toLowerCase());
+const OWNER = (C.ownerEmail || "").toLowerCase();
+const isOwnerPerm = p => OWNER && p.email && p.email.toLowerCase() === OWNER;
+const secName = id => C.sections.find(s => s.id === id).name;
 
-/* ---------- auth ---------- */
+/* ---------- icons ---------- */
+const P = {
+  shield:'<path d="M12 3l7 3v5c0 4.5-3 8.3-7 10-4-1.7-7-5.5-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/>',
+  briefcase:'<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18"/>',
+  wrench:'<path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 6.3-6.3a4 4 0 0 1-5-5L13 5z" transform="translate(-2 -1)"/>',
+  chart:'<path d="M6 20V11M12 20V5M18 20v-6"/>',
+  box:'<path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8"/>',
+  truck:'<path d="M3 6h11v10H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
+  users:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/>',
+  download:'<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+  upload:'<path d="M12 20V9M7 13l5-5 5 5M5 4h14"/>',
+  ext:'<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  trash:'<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/>',
+  refresh:'<path d="M20 11a8 8 0 0 0-14.6-4.5M4 4v4h4M4 13a8 8 0 0 0 14.6 4.5M20 20v-4h-4"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+  link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  file:'<path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/>',
+  grid:'<rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M4 10h16M4 15h16M10 4v16"/>',
+  folder:'<path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/>',
+  chev:'<path d="M6 9l6 6 6-6"/>',
+  out:'<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l4-4-4-4M14 12H4"/>',
+  info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>',
+  lock:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  share:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M19 8v6M16 11h6"/>',
+  x:'<path d="M6 6l12 12M18 6L6 18"/>'
+};
+const ic = (n, cls="") => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[n]||P.file}</svg>`;
+const MS = `<svg class="ms-logo" viewBox="0 0 21 21" aria-hidden="true"><rect width="10" height="10" fill="#f25022"/><rect x="11" width="10" height="10" fill="#7fba00"/><rect y="11" width="10" height="10" fill="#00a4ef"/><rect x="11" y="11" width="10" height="10" fill="#ffb900"/></svg>`;
+
+const AV_COLORS = ["#1d4e6e","#7a4b94","#2f7d4f","#a2561c","#2368a2","#8a3b54","#4f6b16","#3e5a8a"];
+const initials = n => (n||"?").replace(/@.*/,"").replace(/[^\p{L}\s'.-]/gu," ").trim().split(/[\s.]+/).map(w=>w[0]).slice(0,2).join("").toUpperCase() || "?";
+const avColor = n => { let h = 0; for (const c of (n||"")) h = (h*31 + c.charCodeAt(0)) >>> 0; return AV_COLORS[h % AV_COLORS.length]; };
+function avatar(name, size="", photo=null, badge=false){
+  const inner = photo ? `<img src="${esc(photo)}" alt="">` : esc(initials(name));
+  return `<span class="avatar ${size}" style="--av:${avColor(name)}" aria-hidden="true">${inner}${badge?`<span class="ms-badge">${MS}</span>`:""}</span>`;
+}
+
+/* ---------- auth & Graph ---------- */
 async function initAuth(){
   if (DEMO) return;
   msal = new window.msal.PublicClientApplication({
@@ -173,213 +384,580 @@ async function initAuth(){
   const res = await msal.handleRedirectPromise().catch(e => { toast(e.message); return null; });
   account = res?.account || msal.getAllAccounts()[0] || null;
 }
-async function token(scopes){
-  try { return (await msal.acquireTokenSilent({ scopes, account })).accessToken; }
-  catch { return (await msal.acquireTokenPopup({ scopes, account })).accessToken; }
+async function token(){
+  try { return (await msal.acquireTokenSilent({ scopes:SCOPES, account })).accessToken; }
+  catch { return (await msal.acquireTokenPopup({ scopes:SCOPES, account })).accessToken; }
 }
-async function graph(path, opts = {}, write = false){
-  const t = await token(write ? WRITE_SCOPES : READ_SCOPES);
-  const r = await fetch(path.startsWith("http") ? path : GRAPH + path, { ...opts, headers:{ Authorization:"Bearer " + t, ...(opts.headers||{}) } });
+async function graph(path, opts = {}){
+  const t = await token();
+  const headers = { Authorization:"Bearer " + t, ...(opts.headers||{}) };
+  let body = opts.body;
+  if (opts.json !== undefined){ headers["Content-Type"] = "application/json"; body = JSON.stringify(opts.json); }
+  const r = await fetch(path.startsWith("http") ? path : GRAPH + path, { method: opts.method || "GET", headers, body });
   if (r.status === 404) return null;
-  if (!r.ok){ const e = await r.json().catch(()=>({})); throw new Error(e.error?.message || ("Request failed (" + r.status + ")")); }
+  if (!r.ok){
+    const e = await r.json().catch(()=>({}));
+    const err = new Error(e.error?.message || ("Request failed (" + r.status + ")")); err.status = r.status; throw err;
+  }
   return r.status === 204 ? {} : r.json();
+}
+// Runs many Graph GETs in groups of 20. Returns { requestId: {status, body} }.
+async function batch(reqs){
+  const out = {};
+  for (let i = 0; i < reqs.length; i += 20){
+    const res = await graph("/$batch", { method:"POST", json:{ requests: reqs.slice(i, i+20) } });
+    (res?.responses || []).forEach(r => out[r.id] = r);
+  }
+  return out;
+}
+async function loadMe(){
+  if (DEMO){ me = { name:"Akhil Gopi", email:"akhil@zululandfilters.co.za", job:"Business Analyst", photo:null }; return; }
+  me = { name: account.name || account.username, email: account.username, job:"", photo:null };
+  try {
+    const p = await graph("/me?$select=displayName,mail,jobTitle");
+    if (p){ me.name = p.displayName || me.name; me.email = p.mail || me.email; me.job = p.jobTitle || ""; }
+  } catch {}
+  try {
+    const t = await token();
+    const r = await fetch(GRAPH + "/me/photos/96x96/$value", { headers:{ Authorization:"Bearer " + t } });
+    if (r.ok) me.photo = URL.createObjectURL(await r.blob());
+  } catch {}
 }
 const shareId = url => "u!" + btoa(unescape(encodeURIComponent(url))).replace(/=+$/,"").replace(/\//g,"_").replace(/\+/g,"-");
 
-async function resolveRoot(){
-  if (root) return root;
-  if (C.sharedFolderUrl){
-    const it = await graph("/shares/" + shareId(C.sharedFolderUrl) + "/driveItem");
-    if (it){ root = { driveId: it.parentReference.driveId, itemId: it.id }; return root; }
-  }
-  if (isOwner()){
-    let it = await graph("/me/drive/root:/" + encodeURIComponent(C.rootFolder), {}, true);
-    if (!it){
-      it = await graph("/me/drive/root/children", { method:"POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ name:C.rootFolder, folder:{}, "@microsoft.graph.conflictBehavior":"fail" }) }, true);
-    }
-    root = { driveId: it.parentReference.driveId, itemId: it.id }; return root;
-  }
-  throw new Error("The shared folder link is missing or you don't have access to it. Ask the portal owner to share the folder with you.");
+async function getMyDrive(){
+  if (!myDriveId) myDriveId = (await graph("/me/drive?$select=id")).id;
+  return myDriveId;
 }
-const secPath = id => encodeURIComponent(C.sections.find(s=>s.id===id).name);
+// The index lives in the owner's OneDrive and holds one small entry per file:
+// "<driveId>~<itemId>.json". It contains IDs only, so it reveals no file names.
+async function resolveIndex(){
+  if (index) return index;
+  if (isOwner()){
+    let it = await graph("/me/drive/root:/" + enc(C.indexFolderName));
+    if (!it) it = await graph("/me/drive/root/children", { method:"POST", json:{ name:C.indexFolderName, folder:{}, "@microsoft.graph.conflictBehavior":"fail" } });
+    index = { driveId: it.parentReference.driveId, itemId: it.id }; return index;
+  }
+  if (!C.indexFolderUrl) throw new Error("The portal isn't fully set up yet: the index folder link is missing. Ask the portal owner to finish setup.");
+  const it = await graph("/shares/" + shareId(C.indexFolderUrl) + "/driveItem", { headers:{ Prefer:"redeemSharingLink" } });
+  if (!it) throw new Error("You don't have access to the portal index. Ask the portal owner to share it with you.");
+  index = { driveId: it.parentReference.driveId, itemId: it.id }; return index;
+}
+async function writeEntry(sec, driveId, itemId){
+  const ix = await resolveIndex();
+  await graph(`/drives/${ix.driveId}/items/${ix.itemId}:/${enc(secName(sec))}/${enc(driveId + "~" + itemId)}.json:/content`,
+    { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ driveId, itemId }) });
+}
+async function deleteEntry(entryId){
+  if (!entryId) return;
+  const ix = await resolveIndex();
+  try { await graph(`/drives/${ix.driveId}/items/${entryId}`, { method:"DELETE" }); } catch {}
+}
+
+/* ---------- permissions ---------- */
+function mapPerm(p){
+  const g = p.grantedToV2 || p.grantedTo || {};
+  const u = g.user || g.siteUser || g.group || g.siteGroup || {};
+  let email = u.email || (u.loginName || "").split("|").pop() || "";
+  if (!email.includes("@")) email = "";
+  const role = (p.roles||[]).includes("owner") ? "owner" : (p.roles||[]).includes("write") ? "write" : "read";
+  return { id:p.id, name: u.displayName || email || (p.link ? "Sharing link" : "Unknown"), email, role,
+           link: p.link ? (p.link.scope === "organization" ? "Anyone at the company with the link" : p.link.scope === "anonymous" ? "Anyone with the link" : "People with the link") : null,
+           inherited: !!p.inheritedFrom };
+}
+const sharedCount = it => (it.perms || []).filter(p => p.role !== "owner" && !isOwnerPerm(p) && p.email.toLowerCase() !== myEmail()).length;
+// The portal owner always gets "Can edit" on every file. Runs after each upload, and
+// again whenever an uploader opens a tab, so it is restored if someone removes it in OneDrive.
+async function ensureOwnerAccess(it){
+  if (!OWNER || !it.mine || isOwner()) return;
+  const perms = it.perms || await getPerms(it);
+  const p = perms.find(isOwnerPerm);
+  if (p && (p.role === "write" || p.role === "owner")) return;
+  if (p) await setRole(it, p, "write"); else await grant(it, [OWNER], "write", false);
+  await getPerms(it);
+}
+async function getPerms(it){
+  if (DEMO) return it.perms;
+  const res = await graph(`/drives/${it.parentReference.driveId}/items/${it.id}/permissions`);
+  return it.perms = (res?.value || []).map(mapPerm);
+}
+async function grant(it, emails, role, notify){
+  if (DEMO){
+    emails.forEach(e => { if (!it.perms.some(p => p.email === e)) it.perms.push({ id:"p"+Math.random(), name:demoName(e), email:e, role }); });
+    return;
+  }
+  await graph(`/drives/${it.parentReference.driveId}/items/${it.id}/invite`, { method:"POST", json:{
+    recipients: emails.map(email => ({ email })), roles:[role], requireSignIn:true, sendInvitation:notify,
+    ...(notify ? { message: `${me.name} shared this with you on ${C.portalName}.` } : {})
+  }});
+}
+async function setRole(it, p, role){
+  if (DEMO){ p.role = role; return; }
+  const base = `/drives/${it.parentReference.driveId}/items/${it.id}/permissions/${p.id}`;
+  try { await graph(base, { method:"PATCH", json:{ roles:[role] } }); }
+  catch { // some libraries don't allow changing a role in place: remove and re-add
+    await graph(base, { method:"DELETE" });
+    await grant(it, [p.email], role, false);
+  }
+}
+async function revoke(it, p){
+  if (DEMO){ it.perms = it.perms.filter(x => x !== p); return; }
+  await graph(`/drives/${it.parentReference.driveId}/items/${it.id}/permissions/${p.id}`, { method:"DELETE" });
+}
 
 /* ---------- data ---------- */
 async function load(sec){
   if (DEMO){ items[sec] = demoItems(sec); return; }
-  const r = await resolveRoot();
-  const res = await graph(`/drives/${r.driveId}/items/${r.itemId}:/${secPath(sec)}:/children?$top=200&$select=id,name,size,webUrl,lastModifiedDateTime,lastModifiedBy,file,@microsoft.graph.downloadUrl`);
-  const list = (res?.value || []).filter(i => i.file);
+  const [ix, mine] = [await resolveIndex(), await getMyDrive()];
+  const res = await graph(`/drives/${ix.driveId}/items/${ix.itemId}:/${enc(secName(sec))}:/children?$top=999&$select=id,name`);
+  const entries = (res?.value || []).filter(e => e.name.endsWith(".json")).map(e => {
+    const [d, i] = e.name.slice(0, -5).split("~"); return { d, i, entryId: e.id };
+  }).filter(e => e.d && e.i);
+  const reqs = [];
+  entries.forEach((e, k) => {
+    reqs.push({ id:"f"+k, method:"GET", url:`/drives/${e.d}/items/${e.i}?$select=${SEL}` });
+    if (e.d === mine) reqs.push({ id:"p"+k, method:"GET", url:`/drives/${e.d}/items/${e.i}/permissions` });
+  });
+  const out = await batch(reqs);
+  const list = [], seen = new Set();
+  entries.forEach((e, k) => {
+    const r = out["f"+k];
+    if (!r || r.status !== 200 || !r.body?.file){
+      // Your own file was removed from OneDrive directly: tidy up its index entry.
+      if (e.d === mine && r && r.status === 404) deleteEntry(e.entryId);
+      return; // anything else you can't open is simply not shown
+    }
+    if (seen.has(r.body.id)) return; seen.add(r.body.id);
+    const it = r.body; it.entryId = e.entryId; it.mine = e.d === mine;
+    const p = out["p"+k]; if (p?.status === 200) it.perms = (p.body.value || []).map(mapPerm);
+    list.push(it);
+  });
   await Promise.all(list.filter(i => i.name.endsWith(LINK_EXT)).map(async i => {
     try { const j = await (await fetch(i["@microsoft.graph.downloadUrl"])).json(); i.reportUrl = j.url; i.title = j.name; } catch {}
   }));
-  items[sec] = list.sort((a,b) => b.lastModifiedDateTime.localeCompare(a.lastModifiedDateTime));
+  items[sec] = list;
+  // Restore the portal owner's edit access on any of your files that lost it (runs quietly in the background)
+  list.filter(i => i.mine && i.perms && !isOwner()).forEach(i =>
+    ensureOwnerAccess(i).then(() => { if (sec === current) renderList(); }).catch(() => {}));
 }
-async function uploadFile(file){
-  const r = await resolveRoot();
-  const base = `/drives/${r.driveId}/items/${r.itemId}:/${secPath(current)}/${encodeURIComponent(file.name)}:`;
+// Uploads a new file to your OneDrive, or a new version over an existing file.
+async function uploadFile(file, target){
+  const base = target
+    ? `/drives/${target.parentReference.driveId}/items/${target.id}`
+    : `/me/drive/root:/${enc(C.filesFolder)}/${enc(secName(current))}/${enc(file.name)}:`;
   const bar = progressBar(file.name);
   if (file.size < 4*1024*1024){
-    await graph(base + "/content", { method:"PUT", body:file }, true); bar(1); return;
+    const it = await graph(base + "/content" + (target ? "" : "?@microsoft.graph.conflictBehavior=fail"), { method:"PUT", body:file });
+    bar(1); return it;
   }
-  const s = await graph(base + "/createUploadSession", { method:"POST", headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify({ item:{ "@microsoft.graph.conflictBehavior":"replace" } }) }, true);
-  const CHUNK = 320*1024*12;
+  const s = await graph(base + "/createUploadSession", { method:"POST", json:{ item:{ "@microsoft.graph.conflictBehavior": target ? "replace" : "fail" } } });
+  const CHUNK = 320*1024*12; let last = null;
   for (let start = 0; start < file.size; start += CHUNK){
     const end = Math.min(start + CHUNK, file.size);
-    const resp = await fetch(s.uploadUrl, { method:"PUT", body:file.slice(start,end),
-      headers:{ "Content-Range":`bytes ${start}-${end-1}/${file.size}` } });
-    if (!resp.ok && resp.status !== 202) throw new Error("Upload of " + file.name + " stopped at " + Math.round(start/file.size*100) + "%.");
+    const resp = await fetch(s.uploadUrl, { method:"PUT", body:file.slice(start,end), headers:{ "Content-Range":`bytes ${start}-${end-1}/${file.size}` } });
+    if (!resp.ok && resp.status !== 202){ const err = new Error("Upload of " + file.name + " stopped at " + Math.round(start/file.size*100) + "%."); err.status = resp.status; throw err; }
+    if (resp.status !== 202) last = await resp.json().catch(()=>null);
     bar(end/file.size);
   }
+  return last;
+}
+async function findMine(name){
+  const it = await graph(`/me/drive/root:/${enc(C.filesFolder)}/${enc(secName(current))}/${enc(name)}?$select=${SEL}`);
+  if (it && it.file){ it.mine = true; return it; }
+  return null;
 }
 async function saveLink(name, url){
-  const r = await resolveRoot();
   const fname = name.replace(/[\\/:*?"<>|#%]/g,"-") + LINK_EXT;
-  await graph(`/drives/${r.driveId}/items/${r.itemId}:/${secPath(current)}/${encodeURIComponent(fname)}:/content`,
-    { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, url }) }, true);
+  return graph(`/me/drive/root:/${enc(C.filesFolder)}/${enc(secName(current))}/${enc(fname)}:/content?@microsoft.graph.conflictBehavior=rename`,
+    { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ name, url }) });
 }
 async function removeItem(it){
-  const r = await resolveRoot();
-  await graph(`/drives/${r.driveId}/items/${it.id}`, { method:"DELETE" }, true);
+  await graph(`/drives/${it.parentReference.driveId}/items/${it.id}`, { method:"DELETE" });
+  await deleteEntry(it.entryId);
 }
 
 /* ---------- rendering ---------- */
-function renderWho(){
-  const w = $("#who");
-  if (DEMO){ w.innerHTML = `<span class="role">Demo mode</span>`; return; }
-  if (!account){ w.innerHTML = `<button class="btn-primary" id="inBtn">Sign in with Microsoft</button>`; $("#inBtn").onclick = signIn; return; }
-  w.innerHTML = `<span class="role ${isOwner()?"":"viewer"}">${isOwner()?"Owner":"Viewer"}</span><span class="acct">${esc(account.username)}</span><button id="outBtn">Sign out</button>`;
-  $("#outBtn").onclick = () => msal.logoutRedirect({ account });
+function renderProfile(){
+  const w = $("#profile");
+  if (!DEMO && !account){
+    w.innerHTML = `<button class="btn-ms" id="inBtn">${MS}<span>Sign in</span></button>`;
+    $("#inBtn").onclick = signIn; return;
+  }
+  const u = me || { name: account?.name || "", email: account?.username || "" };
+  const role = isOwner() ? "Portal owner" : "Member";
+  w.innerHTML = `
+    <button class="prof-btn" id="profBtn" aria-haspopup="true" aria-expanded="${menuOpen}" aria-controls="profMenu" title="Signed in as ${esc(u.email)}">
+      ${avatar(u.name, "", u.photo, true)}
+      <span class="who"><b>${esc(u.name)}</b><small>${role}${DEMO?" · demo":""}</small></span>
+      ${ic("chev","chev")}
+    </button>
+    <div class="menu" id="profMenu" ${menuOpen?"":"hidden"}>
+      <div class="id">${avatar(u.name, "lg", u.photo, true)}<div><b>${esc(u.name)}</b><span>${esc(u.email)}</span>${u.job?`<span>${esc(u.job)}</span>`:""}</div></div>
+      <div class="facts">
+        <div><span>Account</span><b>${MS} Microsoft 365</b></div>
+        <div><span>Role</span><b><span class="chip ${isOwner()?"":"viewer"}">${role}</span></b></div>
+        <div><span>Your uploads</span><b>Your OneDrive</b></div>
+      </div>
+      ${DEMO ? `<p style="margin:0;font-size:12px;color:var(--muted)">Demo mode: sample profile shown.</p>` : `<button class="btn" id="outBtn">${ic("out")}Sign out</button>`}
+    </div>`;
+  $("#profBtn").onclick = e => { e.stopPropagation(); menuOpen = !menuOpen; renderProfile(); };
+  $("#profMenu").onclick = e => e.stopPropagation();
+  if ($("#outBtn")) $("#outBtn").onclick = () => msal.logoutRedirect({ account });
 }
+document.addEventListener("click", () => { if (menuOpen){ menuOpen = false; renderProfile(); } });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && menuOpen){ menuOpen = false; renderProfile(); $("#profBtn")?.focus(); } });
+
 function renderTabs(){
-  $("#tabs").innerHTML = C.sections.map(s => `<a href="#${s.id}" role="tab" aria-selected="${s.id===current}">${esc(s.name)}${items[s.id]?`<span class="n">${items[s.id].length}</span>`:""}</a>`).join("");
+  $("#tabs").innerHTML = C.sections.map(s => `<a href="#${s.id}" role="tab" aria-selected="${s.id===current}">${ic(s.icon||"chart")}${esc(s.name)}${items[s.id]?`<span class="n">${items[s.id].length}</span>`:""}</a>`).join("");
 }
-function kindOf(it){
-  if (it.reportUrl) return ["REPORT","link"];
-  const ext = it.name.split(".").pop().toUpperCase();
-  return [ext.slice(0,5), ""];
+function typeOf(it){
+  if (it.reportUrl) return { label:"LINK", icon:"link", c:"--c-link", name:"Power BI link" };
+  const ext = it.name.split(".").pop().toLowerCase();
+  if (["pbix","pbit","pbip"].includes(ext)) return { label:ext.toUpperCase(), icon:"chart", c:"--c-bi", name:"Power BI file", bi:true };
+  if (ext === "pdf") return { label:"PDF", icon:"file", c:"--c-pdf", name:"PDF" };
+  if (["xlsx","xlsm","csv","xls"].includes(ext)) return { label:ext.toUpperCase(), icon:"grid", c:"--c-xls", name:"Spreadsheet" };
+  if (["docx","pptx","doc","ppt"].includes(ext)) return { label:ext.toUpperCase(), icon:"file", c:"--c-doc", name:"Office file" };
+  return { label:ext.toUpperCase().slice(0,4), icon:"file", c:"--c-other", name:"File" };
 }
-const fmtSize = b => b > 1048576 ? (b/1048576).toFixed(1) + " MB" : Math.max(1, Math.round(b/1024)) + " KB";
-const fmtDate = d => new Date(d).toLocaleDateString(undefined, { day:"2-digit", month:"short", year:"numeric" });
+const fmtSize = b => b >= 1048576 ? (b/1048576).toFixed(1) + " MB" : Math.max(1, Math.round(b/1024)) + " KB";
+const fmtDate = d => new Date(d).toLocaleDateString("en-ZA", { day:"numeric", month:"short", year:"numeric" });
+function ago(d){
+  const days = Math.floor((Date.now() - new Date(d)) / 864e5);
+  if (days < 1) return "Today"; if (days < 2) return "Yesterday"; if (days < 7) return days + " days ago";
+  return fmtDate(d);
+}
+const ownerName = it => it.createdBy?.user?.displayName || it.lastModifiedBy?.user?.displayName || "a colleague";
+function visible(){
+  const list = (items[current] || []).filter(i =>
+    (i.title||i.name).toLowerCase().includes(filter) && (scope === "all" || (scope === "mine") === !!i.mine));
+  const by = { new:(a,b)=>b.lastModifiedDateTime.localeCompare(a.lastModifiedDateTime),
+               name:(a,b)=>(a.title||a.name).localeCompare(b.title||b.name),
+               size:(a,b)=>(b.size||0)-(a.size||0) }[sort];
+  return list.sort(by);
+}
 
 function renderMain(){
   const sec = C.sections.find(s => s.id === current);
   const m = $("#main");
   if (!DEMO && !account){
-    m.innerHTML = `<div class="signin"><h2>Sign in to view reports</h2><p>Use the same Microsoft account you use for Power BI. You'll only see sections the portal owner has shared with you.</p><button class="btn-primary" id="inBtn2">Sign in with Microsoft</button></div>`;
+    $("#tabs").parentElement.hidden = true;
+    m.innerHTML = `<div class="signin">
+      <span class="mark" aria-hidden="true"><svg class="i" viewBox="0 0 24 24"><path d="M6 20V11M12 20V5M18 20v-6"/></svg></span>
+      <h2>Sign in to ${esc(C.portalName)}</h2>
+      <p>Use your Zululand Filters Microsoft 365 account. You'll see the reports that have been shared with you, and you can upload and share your own.</p>
+      <button class="btn-ms" id="inBtn2">${MS}<span>Sign in with Microsoft</span></button></div>`;
     $("#inBtn2").onclick = signIn; return;
   }
-  const list = (items[current] || []).filter(i => (i.title||i.name).toLowerCase().includes(filter));
-  const owner = isOwner();
+  $("#tabs").parentElement.hidden = false;
   m.innerHTML = `
-    ${DEMO ? `<div class="notice"><b>Demo mode.</b> These are sample entries. Add your Entra app ID and OneDrive details in the configuration block at the top of this file to go live (see README).</div>` : ""}
-    <div class="sec-head">
-      <div><h2>${esc(sec.name)}</h2><p>${esc(sec.blurb||"")}</p><div class="path">OneDrive › ${esc(C.rootFolder)} › ${esc(sec.name)}</div></div>
-      <div class="tools">
-        <input type="search" id="q" placeholder="Filter reports" aria-label="Filter reports" value="${esc(filter)}">
-        <button id="refresh">Refresh</button>
-        ${owner ? `<button id="addLink">Add report link</button><button class="btn-primary" id="upBtn">Upload files</button>` : ""}
+    ${DEMO ? `<div class="notice">${ic("info")}<div><b>Demo mode.</b> Sample people and files only. Nothing is uploaded or shared.</div></div>` : ""}
+    <section class="panel" aria-labelledby="secTitle">
+      <div class="panel-head">
+        <div style="min-width:0">
+          <h2 id="secTitle">${esc(sec.name)}</h2>
+          <p>${esc(sec.blurb||"")}</p>
+          <div class="crumb">${ic("lock")}You see files you uploaded and files shared with you</div>
+        </div>
+        <div class="head-acts"><button id="addLink">${ic("link")}Add report link</button><button class="btn-primary" id="upBtn">${ic("upload")}Upload files</button></div>
       </div>
-    </div>
-    ${owner ? `<div class="drop" id="drop">Drop .pbix files here to upload them to <b>${esc(sec.name)}</b><div id="bars" style="display:grid;gap:6px;margin-top:8px"></div></div>` : ""}
-    <div class="list">${ list.length ? list.map(rowHtml).join("") : `<div class="empty">${items[current] ? "No reports in this section yet." : "Loading…"}</div>` }</div>`;
+      <div class="toolbar">
+        <div class="search">${ic("search")}<input type="search" id="q" placeholder="Search ${esc(sec.name)} reports" aria-label="Search reports" value="${esc(filter)}"></div>
+        <div class="seg-sm" role="group" aria-label="Show">
+          <button data-scope="all" aria-pressed="${scope==="all"}">All</button>
+          <button data-scope="mine" aria-pressed="${scope==="mine"}">My uploads</button>
+          <button data-scope="shared" aria-pressed="${scope==="shared"}">${isOwner() ? "Others' uploads" : "Shared with me"}</button>
+        </div>
+        <select id="sort" aria-label="Sort"><option value="new">Newest first</option><option value="name">Name A–Z</option><option value="size">Largest first</option></select>
+        <button class="btn-ghost icon-btn" id="refresh" title="Refresh" aria-label="Refresh">${ic("refresh")}</button>
+      </div>
+      <div class="drop" id="drop">${ic("upload")}<span>Drag files here to upload to <b>${esc(sec.name)}</b>, or <button class="link" id="browse">browse</button>. Only you can see them until you share them.</span></div><div id="bars"></div>
+      <div class="table" id="table"></div>
+    </section>`;
+  $("#sort").value = sort;
   $("#q").oninput = e => { filter = e.target.value.toLowerCase(); renderList(); };
+  $("#sort").onchange = e => { sort = e.target.value; renderList(); };
+  document.querySelectorAll("[data-scope]").forEach(b => b.onclick = () => {
+    scope = b.dataset.scope; document.querySelectorAll("[data-scope]").forEach(x => x.setAttribute("aria-pressed", x === b)); renderList();
+  });
   $("#refresh").onclick = () => refresh(true);
-  if (owner){
-    $("#upBtn").onclick = () => $("#fileInput").click();
-    $("#addLink").onclick = () => { $("#linkForm").reset(); $("#linkDlg").showModal(); };
-    const d = $("#drop");
-    d.ondragover = e => { e.preventDefault(); d.classList.add("over"); };
-    d.ondragleave = () => d.classList.remove("over");
-    d.ondrop = e => { e.preventDefault(); d.classList.remove("over"); handleFiles(e.dataTransfer.files); };
-  }
-  bindRows();
+  $("#upBtn").onclick = $("#browse").onclick = () => $("#fileInput").click();
+  $("#addLink").onclick = () => { $("#linkForm").reset(); $("#linkDlg").showModal(); };
+  const d = $("#drop");
+  d.ondragover = e => { e.preventDefault(); d.classList.add("over"); };
+  d.ondragleave = () => d.classList.remove("over");
+  d.ondrop = e => { e.preventDefault(); d.classList.remove("over"); handleFiles(e.dataTransfer.files); };
+  renderList();
 }
 function renderList(){
-  const list = (items[current] || []).filter(i => (i.title||i.name).toLowerCase().includes(filter));
-  document.querySelector(".list").innerHTML = list.length ? list.map(rowHtml).join("") : `<div class="empty">No reports match "${esc(filter)}".</div>`;
+  const t = $("#table"); if (!t) return;
+  const head = `<div class="thead" aria-hidden="true"><span></span><span>Name</span><span>Last updated</span><span>Actions</span></div>`;
+  if (!items[current]){
+    t.innerHTML = head + [1,2,3].map(() => `<div class="row loading"><span class="ftype"></span><div class="name"><div class="skel" style="width:55%"></div><div class="skel" style="width:30%;margin-top:8px"></div></div><div class="skel" style="width:70%"></div><span></span></div>`).join("");
+    return;
+  }
+  const list = visible();
+  if (!list.length){
+    const none = !items[current].length;
+    const msg = none ? ["No reports here yet", "Upload a file or add a report link. Files other people share with you will also appear here."]
+      : filter ? [`Nothing matches "${esc(filter)}"`, "Try a different search."]
+      : scope === "mine" ? ["You haven't uploaded anything here", "Upload a file to add it to this section."]
+      : ["Nothing shared with you here yet", "Files appear here when a colleague gives you access."];
+    t.innerHTML = `<div class="empty"><span class="big">${ic(none ? "folder" : "search")}</span><b>${msg[0]}</b><span>${msg[1]}</span></div>`;
+    return;
+  }
+  t.innerHTML = head + list.map(rowHtml).join("");
   bindRows();
 }
-/* A .pbix opened from the OneDrive file view loads in Power BI's web viewer.
-   Convert the file's direct address into that view:
-   https://<tenant>-my.sharepoint.com/my?id=<file path>&parent=<folder path> */
-function webViewerUrl(webUrl){
-  try {
-    const u = new URL(webUrl);
-    const path = decodeURIComponent(u.pathname);
-    if (!path.startsWith("/personal/")) return webUrl + (u.search ? "&" : "?") + "web=1";
-    const parent = path.slice(0, path.lastIndexOf("/"));
-    return `${u.origin}/my?id=${encodeURIComponent(path)}&parent=${encodeURIComponent(parent)}`;
-  } catch { return webUrl; }
+function accessLabel(it){
+  if (!it.mine) return isOwner()
+    ? `<span class="acc from">${ic("users")}Uploaded by ${esc(ownerName(it))}</span>`
+    : `<span class="acc from">${ic("users")}Shared with you by ${esc(ownerName(it))}</span>`;
+  if (!it.perms) return `<span class="acc private">${ic("lock")}Uploaded by you</span>`;
+  const n = sharedCount(it);
+  return n ? `<span class="acc shared">${ic("users")}Shared with ${n} ${n>1?"people":"person"}</span>`
+    : `<span class="acc private">${ic("lock")}${isOwner() ? "Only you" : "Only you and the portal owner"}</span>`;
 }
 function rowHtml(it){
-  const [k, cls] = kindOf(it);
+  const ty = typeOf(it);
   const who = it.lastModifiedBy?.user?.displayName || "";
   const title = it.title || it.name;
-  const dl = it["@microsoft.graph.downloadUrl"] ? `<a class="btn" href="${esc(it["@microsoft.graph.downloadUrl"])}">Download</a>` : "";
-  const ext = it.name.split(".").pop().toLowerCase();
+  const dl = `<button class="${ty.bi ? "btn-primary" : ""}" data-dl="${esc(it.id)}">${ic("download")}Download</button>`;
   const acts = it.reportUrl
-    ? `<a class="btn btn-primary" href="${esc(it.reportUrl)}" target="_blank" rel="noopener">Open in Power BI</a>`
-    : ext === "pbix"
-    ? `<a class="btn btn-primary" href="${esc(webViewerUrl(it.webUrl))}" target="_blank" rel="noopener">Open in Power BI</a>${dl}`
-    : ext === "pbip"
-    ? `<span class="s" style="font:12px var(--f-mono);color:var(--muted)">Project file – publish to view online</span>${dl}`
-    : `<a class="btn btn-primary" href="${esc(it.webUrl)}" target="_blank" rel="noopener">Open</a>${dl}`;
-  return `<div class="row" data-id="${esc(it.id)}"><span class="kind ${cls}">${esc(k)}</span>
-    <div class="meta"><div class="t">${esc(title)}</div><div class="s">${it.reportUrl ? "app.powerbi.com" : fmtSize(it.size)} · ${fmtDate(it.lastModifiedDateTime)}${who?" · "+esc(who):""}</div></div>
-    <div class="acts">${acts}${isOwner()?`<button class="del" data-del="${esc(it.id)}">Delete</button>`:""}</div></div>`;
+    ? `<a class="btn btn-primary" href="${esc(it.reportUrl)}" target="_blank" rel="noopener">${ic("ext")}Open in Power BI</a>`
+    : ty.bi ? dl
+    : `<a class="btn" href="${esc(it.webUrl)}" target="_blank" rel="noopener">${ic("eye")}View</a>${dl}`;
+  const own = it.mine
+    ? `<button class="btn-ghost icon-btn" data-acc="${esc(it.id)}" title="Manage access" aria-label="Manage access to ${esc(title)}">${ic("share")}</button>
+       <button class="btn-ghost icon-btn btn-danger" data-del="${esc(it.id)}" title="Delete" aria-label="Delete ${esc(title)}">${ic("trash")}</button>`
+    : isOwner() && !it.reportUrl
+    ? `<button class="btn-ghost icon-btn" data-ver="${esc(it.id)}" title="Upload new version" aria-label="Upload new version of ${esc(title)}">${ic("upload")}</button>` : "";
+  return `<div class="row">
+    <span class="ftype" style="--c:var(${ty.c})" title="${esc(ty.name)}">${ic(ty.icon)}<em>${esc(ty.label)}</em></span>
+    <div class="name"><div class="t">${esc(title)}</div><div class="s">${esc(ty.name)}${it.reportUrl ? "" : " · " + fmtSize(it.size)} · ${accessLabel(it)}</div></div>
+    <div class="upd">${who ? avatar(who, "sm") : ""}<div><b title="${esc(fmtDate(it.lastModifiedDateTime))}">${ago(it.lastModifiedDateTime)}</b>${who?`<span>${esc(who)}</span>`:""}</div></div>
+    <div class="acts">${acts}${own}</div></div>`;
+}
+async function downloadItem(id, btn){
+  if (DEMO){ toast("Downloads work once the portal is connected to OneDrive"); return; }
+  const it = items[current].find(i => i.id === id);
+  btn.disabled = true; const html = btn.innerHTML; btn.textContent = "Preparing…";
+  try {
+    // Fetch a fresh link each time: OneDrive download links expire after about an hour.
+    const f = await graph(`/drives/${it.parentReference.driveId}/items/${id}?$select=name,@microsoft.graph.downloadUrl`);
+    const url = f && f["@microsoft.graph.downloadUrl"];
+    if (!url) throw new Error("This file is no longer available to you. It may have been deleted or unshared. Click Refresh.");
+    const a = document.createElement("a"); a.href = url; a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
+  } catch(e){ toast(e.message); }
+  finally { btn.disabled = false; btn.innerHTML = html; }
 }
 function bindRows(){
+  document.querySelectorAll("[data-dl]").forEach(b => b.onclick = () => downloadItem(b.dataset.dl, b));
+  document.querySelectorAll("[data-acc]").forEach(b => b.onclick = () => openAccess(items[current].find(i => i.id === b.dataset.acc)));
+  document.querySelectorAll("[data-ver]").forEach(b => b.onclick = () => { verTarget = items[current].find(i => i.id === b.dataset.ver); $("#verInput").click(); });
   document.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
     const it = items[current].find(i => i.id === b.dataset.del);
-    $("#confirmText").textContent = `"${it.title||it.name}" will be moved to the OneDrive recycle bin.`;
+    const n = sharedCount(it);
+    $("#confirmText").textContent = `"${it.title||it.name}" will be removed from the portal${n ? ` for you and the ${n} ${n>1?"people":"person"} it's shared with` : ""} and moved to your OneDrive recycle bin, where you can restore it for 93 days.`;
     $("#confirmDlg").returnValue = ""; $("#confirmDlg").showModal();
     $("#confirmDlg").onclose = async () => {
       if ($("#confirmDlg").returnValue !== "yes") return;
-      if (DEMO){ items[current] = items[current].filter(i=>i!==it); renderTabs(); renderList(); toast("Deleted (demo)"); return; }
+      if (DEMO){ items[current] = items[current].filter(i=>i!==it); renderTabs(); renderList(); toast("Deleted"); return; }
       try { await removeItem(it); toast("Deleted"); refresh(true); } catch(e){ toast(e.message); }
     };
   });
 }
+
+/* ---------- access dialog ---------- */
+let accItem = null;
+function renderAccess(){
+  const it = accItem, list = $("#accList");
+  if (!it.perms){ list.innerHTML = `<div class="prow"><div class="pm"><span>Loading…</span></div></div>`; return; }
+  const rows = [...it.perms].sort((a,b) => (a.role==="owner"?-1:b.role==="owner"?1:0) || a.name.localeCompare(b.name));
+  list.innerHTML = rows.map(p => {
+    const you = p.email && p.email.toLowerCase() === myEmail();
+    const portal = isOwnerPerm(p) && p.role !== "owner";
+    const fixed = p.role === "owner" || p.inherited || you || portal;
+    const ctl = fixed
+      ? `<span class="fixed">${p.role === "owner" ? "Owner" : portal ? "Can edit · portal owner" : p.inherited ? "From folder" : p.role === "write" ? "Can edit" : "Can view"}</span>`
+      : p.link
+      ? `<span class="fixed">${p.role === "write" ? "Can edit" : "Can view"}</span><button type="button" class="btn-ghost icon-btn btn-danger" data-rm="${esc(p.id)}" title="Remove link" aria-label="Remove link">${ic("x")}</button>`
+      : `<select data-role="${esc(p.id)}" aria-label="Permission for ${esc(p.name)}"><option value="read" ${p.role==="read"?"selected":""}>Can view</option><option value="write" ${p.role==="write"?"selected":""}>Can edit</option></select>
+         <button type="button" class="btn-ghost icon-btn btn-danger" data-rm="${esc(p.id)}" title="Remove access" aria-label="Remove ${esc(p.name)}">${ic("x")}</button>`;
+    return `<div class="prow">${p.link ? `<span class="avatar" style="--av:#5f6c76">${ic("link")}</span>` : avatar(p.name || p.email)}
+      <div class="pm"><b>${esc(p.link || p.name)}${you ? " (you)" : ""}</b><span>${esc(p.link ? "Sharing link" : p.email)}</span></div>${ctl}</div>`;
+  }).join("") || `<div class="prow"><div class="pm"><span>Only you</span></div></div>`;
+  list.querySelectorAll("[data-role]").forEach(s => s.onchange = () => act(async () => {
+    await setRole(it, it.perms.find(p => p.id === s.dataset.role), s.value); await reloadPerms();
+  }, "Permission updated"));
+  list.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => act(async () => {
+    await revoke(it, it.perms.find(p => p.id === b.dataset.rm)); await reloadPerms();
+  }, "Access removed"));
+}
+async function reloadPerms(){ await getPerms(accItem); renderAccess(); renderList(); }
+async function act(fn, done){
+  showErr("");
+  $("#accForm").querySelectorAll("button,select,input").forEach(x => x.disabled = true);
+  try { await fn(); if (done) toast(done); }
+  catch(e){ showErr(e.message); }
+  finally { $("#accForm").querySelectorAll("button,select,input").forEach(x => x.disabled = false); }
+}
+function showErr(msg){ const e = $("#accErr"); e.textContent = msg; e.hidden = !msg; }
+function openAccess(it, justUploaded = false){
+  accItem = it;
+  const ty = typeOf(it);
+  $("#accIcon").style.setProperty("--c", `var(${ty.c})`); $("#accIcon").innerHTML = ic(ty.icon) + `<em>${esc(ty.label)}</em>`;
+  $("#accTitle").textContent = justUploaded ? "Who can see this file?" : "Manage access";
+  $("#accFile").textContent = it.title || it.name;
+  $("#accIntro").textContent = justUploaded
+    ? "Uploaded. Right now only you can see it. Add the people who should be able to view or edit it."
+    : "Only the people listed here can see this file in the portal.";
+  if (!isOwner()) $("#accIntro").textContent += " The portal owner always has edit access.";
+  $("#accEmails").value = ""; $("#accRole").value = "read"; showErr("");
+  renderAccess();
+  if (!DEMO) act(() => reloadPerms());
+  return new Promise(res => {
+    const d = $("#accessDlg");
+    d.onclose = () => { accItem = null; renderList(); res(); };
+    d.showModal(); setTimeout(() => $("#accEmails").focus(), 50);
+  });
+}
+function parseEmails(text){
+  const raw = text.split(/[\s,;]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+  const bad = [], ok = [];
+  for (const e of raw){
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) bad.push(`"${e}" isn't an email address`);
+    else if (C.allowedDomains?.length && !C.allowedDomains.includes(e.split("@")[1])) bad.push(`${e} is outside ${C.allowedDomains.join(", ")}`);
+    else if (e === myEmail()) bad.push("you already have access");
+    else if (!ok.includes(e)) ok.push(e);
+  }
+  return { ok, bad };
+}
+$("#accAdd").onclick = () => {
+  const { ok, bad } = parseEmails($("#accEmails").value);
+  if (bad.length){ showErr("Check the addresses: " + bad.join("; ") + "."); return; }
+  if (!ok.length){ showErr("Type at least one email address."); return; }
+  const role = $("#accRole").value, notify = $("#accNotify").checked;
+  act(async () => { await grant(accItem, ok, role, notify); $("#accEmails").value = ""; await reloadPerms(); },
+      `${ok.length} ${ok.length>1?"people":"person"} can now ${role==="write"?"edit":"view"} this file`);
+};
+$("#accEmails").onkeydown = e => { if (e.key === "Enter"){ e.preventDefault(); $("#accAdd").click(); } };
+
+/* ---------- misc UI ---------- */
 function progressBar(name){
   const box = $("#bars"); if (!box) return ()=>{};
-  const el = document.createElement("div");
-  el.innerHTML = `<div style="font:12px var(--f-mono);text-align:left">${esc(name)}</div><div class="progress"><i></i></div>`;
+  const el = document.createElement("div"); el.className = "bar-row";
+  el.innerHTML = `<span>${esc(name)}</span><div class="progress"><i></i></div>`;
   box.appendChild(el);
   return f => { el.querySelector("i").style.width = Math.round(f*100) + "%"; if (f >= 1) setTimeout(()=>el.remove(), 1500); };
 }
 let toastT;
 function toast(msg){
   let t = $(".toast"); if (!t){ t = document.createElement("div"); t.className = "toast"; t.setAttribute("role","status"); document.body.appendChild(t); }
-  t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(()=> t.hidden = true, 4000);
+  t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(()=> t.hidden = true, 4500);
+}
+function askReplace(text){
+  return new Promise(res => {
+    const d = $("#replaceDlg");
+    $("#replaceText").textContent = text;
+    d.returnValue = "";
+    d.onclose = () => res(d.returnValue === "replace");
+    d.showModal();
+  });
 }
 
 /* ---------- actions ---------- */
-async function signIn(){ await msal.loginRedirect({ scopes: READ_SCOPES }); }
+async function signIn(){ await msal.loginRedirect({ scopes: SCOPES }); }
 async function handleFiles(files){
   if (!files?.length) return;
-  if (DEMO){
-    [...files].forEach(f => items[current].unshift({ id:"d"+Math.random(), name:f.name, size:f.size, webUrl:"#", lastModifiedDateTime:new Date().toISOString(), lastModifiedBy:{user:{displayName:"You"}} }));
-    renderTabs(); renderList(); toast("Added to list (demo — nothing uploaded)"); return;
+  const sec = current, sName = secName(sec);
+  let replaced = 0, kept = 0; const added = [];
+  for (const f of [...files]){
+    const lower = f.name.toLowerCase();
+    const same = (items[sec] || []).filter(i => i.name.toLowerCase() === lower);
+    let existing = same.find(i => i.mine) || same[0] || null;
+    if (!existing && !DEMO){ try { existing = await findMine(f.name); } catch {} }
+    if (existing){
+      const who = existing.mine ? "you" : ownerName(existing);
+      const ok = await askReplace(`"${f.name}" already exists in ${sName} (uploaded by ${who}, last updated ${fmtDate(existing.lastModifiedDateTime)}). Replace it with your file? Everyone who can see it will get the new version, and the old one stays in OneDrive's version history.`);
+      if (!ok){ kept++; continue; }
+      if (DEMO){
+        if (!existing.mine && existing.myRole !== "write" && !isOwner()){ toast(`You can only view "${f.name}", so it wasn't replaced. Ask ${who} for edit access, or rename your file.`); continue; }
+        Object.assign(existing, { size:f.size, lastModifiedDateTime:new Date().toISOString(), lastModifiedBy:{user:{displayName:me.name}} });
+        replaced++; continue;
+      }
+      try {
+        await uploadFile(f, existing);
+        if (existing.mine && !existing.entryId) await writeEntry(sec, existing.parentReference.driveId, existing.id);
+        replaced++;
+      } catch(e){
+        toast(e.status === 403 || e.status === 401 ? `You can only view "${f.name}", so it wasn't replaced. Ask ${who} for edit access, or rename your file.` : e.message);
+      }
+      continue;
+    }
+    if (DEMO){
+      const it = { id:"d"+Math.random(), name:f.name, size:f.size, webUrl:"#", mine:true, lastModifiedDateTime:new Date().toISOString(),
+        lastModifiedBy:{user:{displayName:me.name}}, createdBy:{user:{displayName:me.name}}, parentReference:{driveId:"me"},
+        perms:[{ id:"o", name:me.name, email:me.email, role:"owner" }] };
+      items[sec].unshift(it); added.push(it); continue;
+    }
+    try {
+      const it = await uploadFile(f, null);
+      await writeEntry(sec, it.parentReference.driveId, it.id);
+      it.mine = true;
+      try { await ensureOwnerAccess(it); } catch { toast(`"${f.name}" uploaded, but the portal owner couldn't be given access yet. It will be retried next time you open this tab.`); }
+      added.push(it);
+    } catch(e){
+      toast(e.status === 409 ? `"${f.name}" was uploaded by someone else a moment ago. Upload it again to choose whether to replace it.` : e.message);
+    }
   }
-  const all = [...files];
-  const proj = all.filter(f => /\.pbip$/i.test(f.name));
-  const ok = all.filter(f => !/\.pbip$/i.test(f.name));
-  if (proj.length) toast("A .pbip project can't open in Power BI on the web. In Power BI Desktop use File → Save as → .pbix, then upload that.");
-  if (!ok.length) return;
-  for (const f of ok){ try { await uploadFile(f); } catch(e){ toast(e.message); } }
-  if (!proj.length) toast(ok.length + (ok.length>1?" files":" file") + " uploaded to " + C.sections.find(s=>s.id===current).name);
-  refresh(true);
+  const parts = [];
+  if (added.length) parts.push(added.length + (added.length>1 ? " files" : " file") + " uploaded");
+  if (replaced) parts.push(replaced + " replaced");
+  if (kept) parts.push(kept + " skipped");
+  if (parts.length) toast(parts.join(", ") + " · " + sName);
+  if (DEMO){ renderTabs(); renderList(); }
+  else await refresh(true);
+  // Ask who should see each new file
+  for (const a of added){
+    const it = (items[sec] || []).find(i => i.id === a.id);
+    if (it) await openAccess(it, true);
+  }
 }
 $("#fileInput").onchange = e => { handleFiles(e.target.files); e.target.value = ""; };
+// Portal owner: replace the contents of someone else's file with a new version
+let verTarget = null;
+$("#verInput").onchange = async e => {
+  const f = e.target.files[0], it = verTarget; e.target.value = ""; verTarget = null;
+  if (!f || !it) return;
+  const title = it.title || it.name;
+  const ext = n => n.split(".").pop().toLowerCase();
+  const ok = await askReplace(`Replace "${title}" (uploaded by ${ownerName(it)}) with "${f.name}"? The file keeps its name and sharing, and the old version stays in OneDrive's version history.`);
+  if (!ok) return;
+  if (ext(f.name) !== ext(it.name)){ toast(`Choose a .${ext(it.name)} file to replace "${title}".`); return; }
+  if (DEMO){ Object.assign(it, { size:f.size, lastModifiedDateTime:new Date().toISOString(), lastModifiedBy:{user:{displayName:me.name}} }); renderList(); toast("New version uploaded"); return; }
+  try { await uploadFile(f, it); toast(`New version of "${title}" uploaded`); refresh(true); }
+  catch(err){ toast(err.status === 403 ? `You don't have edit access to "${title}" yet. Ask ${ownerName(it)} to open the portal once so access is restored.` : err.message); }
+};
 $("#lnkCancel").onclick = () => $("#linkDlg").close();
 $("#linkForm").onsubmit = async e => {
   e.preventDefault();
   const name = $("#lnkName").value.trim(), url = $("#lnkUrl").value.trim();
   $("#linkDlg").close();
-  if (DEMO){ items[current].unshift({ id:"d"+Math.random(), name:name+LINK_EXT, title:name, reportUrl:url, lastModifiedDateTime:new Date().toISOString(), lastModifiedBy:{user:{displayName:"You"}} }); renderTabs(); renderList(); toast("Link added (demo)"); return; }
-  try { await saveLink(name, url); toast("Link saved"); refresh(true); } catch(err){ toast(err.message); }
+  let created;
+  if (DEMO){
+    created = { id:"d"+Math.random(), name:name+LINK_EXT, title:name, reportUrl:url, mine:true, lastModifiedDateTime:new Date().toISOString(),
+      lastModifiedBy:{user:{displayName:me.name}}, parentReference:{driveId:"me"}, perms:[{ id:"o", name:me.name, email:me.email, role:"owner" }] };
+    items[current].unshift(created); renderTabs(); renderList(); toast("Link added");
+  } else {
+    try {
+      const it = await saveLink(name, url); await writeEntry(current, it.parentReference.driveId, it.id);
+      it.mine = true; try { await ensureOwnerAccess(it); } catch {}
+      toast("Link saved"); created = it; await refresh(true);
+    }
+    catch(err){ toast(err.message); return; }
+  }
+  const it = items[current].find(i => i.id === created.id);
+  if (it) openAccess(it, true);
 };
 
 async function refresh(force){
@@ -388,7 +966,7 @@ async function refresh(force){
   renderTabs(); renderMain();
   try { if (!items[current]) await load(current); }
   catch(e){ items[current] = []; toast(e.message); }
-  renderTabs(); renderMain();
+  renderTabs(); renderList();
 }
 function fromHash(){
   const h = location.hash.slice(1);
@@ -398,20 +976,40 @@ function fromHash(){
 window.addEventListener("hashchange", fromHash);
 
 /* ---------- demo data ---------- */
+const DEMO_PEOPLE = { thandi:"Thandi Mkhize", sipho:"Sipho Ndlovu", priya:"Priya Reddy", johan:"Johan van Wyk", lerato:"Lerato Khumalo" };
+function demoName(email){
+  const k = email.split("@")[0].toLowerCase();
+  return DEMO_PEOPLE[k] || k.replace(/[._]/g," ").replace(/\b\w/g, c => c.toUpperCase());
+}
 function demoItems(sec){
-  const d = (n) => new Date(Date.now() - n*864e5).toISOString();
+  const d = n => new Date(Date.now() - n*864e5).toISOString();
+  const mk = k => ({ id:"p"+k, name:DEMO_PEOPLE[k], email:k+"@zululandfilters.co.za" });
+  const meP = { id:"o", name:"Akhil Gopi", email:"akhil@zululandfilters.co.za", role:"owner" };
+  // [name, size, daysAgo, uploaderKey|"me", sharedWith [[key, role]], reportUrl, myRole]
   const S = {
-    sheq:[["Incident & LTIFR Tracker.pbix",18.4e6,2,"Thandi M."],["Monthly Safety Pack Oct 2026",0,1,"Thandi M.","https://app.powerbi.com/"],["Environmental Permits Register.pbix",6.2e6,9,"Sipho N."],["ISO 9001 Audit Findings.pbix",3.1e6,21,"Thandi M."]],
-    admin:[["Headcount & Overtime.pbix",9.7e6,3,"Priya R."],["Budget vs Actual FY27",0,5,"Priya R.","https://app.powerbi.com/"],["Fleet Cost Summary.pbix",4.4e6,14,"Johan V."]],
-    engineering:[["Planned Maintenance Compliance.pbix",22.9e6,1,"Johan V."],["Asset Downtime (MTBF-MTTR).pbix",15.3e6,6,"Lerato K."],["Capex Project Tracker",0,11,"Lerato K.","https://app.powerbi.com/"]]
+    sheq:[["Incident & LTIFR Tracker.pbix",18.4e6,0.2,"me",[["thandi","write"],["sipho","read"]]],
+          ["Monthly Safety Pack Oct 2026",0,1,"thandi",[],"https://app.powerbi.com/",null,"read"],
+          ["Environmental Permits Register.pbix",6.2e6,9,"sipho",[],null,"write"],
+          ["ISO 9001 Audit Findings.pdf",1.1e6,21,"me",[]]],
+    admin:[["Headcount & Overtime.pbix",9.7e6,3,"priya",[],null,"read"],
+           ["Budget vs Actual FY27",0,5,"me",[["priya","write"]],"https://app.powerbi.com/"]],
+    engineering:[["Planned Maintenance Compliance.pbix",22.9e6,1,"johan",[],null,"write"],
+                 ["Asset Downtime (MTBF-MTTR).pbix",15.3e6,6,"me",[["lerato","read"],["johan","read"]]]]
   };
-  return (S[sec]||[]).map((r,i)=>({ id:sec+i, name:r[4]?r[0]+LINK_EXT:r[0], title:r[4]?r[0]:null, reportUrl:r[4]||null, size:r[1], webUrl:"#", lastModifiedDateTime:d(r[2]), lastModifiedBy:{user:{displayName:r[3]}} }));
+  return (S[sec]||[]).map((r,i) => {
+    const mine = r[3] === "me", up = mine ? "Akhil Gopi" : DEMO_PEOPLE[r[3]];
+    return { id:sec+i, name:r[5] ? r[0]+LINK_EXT : r[0], title:r[5] ? r[0] : null, reportUrl:r[5]||null, size:r[1], webUrl:"#",
+      mine, myRole: r[6] || null, lastModifiedDateTime:d(r[2]), lastModifiedBy:{user:{displayName:up}}, createdBy:{user:{displayName:up}},
+      parentReference:{driveId: mine ? "me" : r[3]},
+      perms: mine ? [meP, ...r[4].map(([k, role]) => ({ ...mk(k), role }))] : null };
+  });
 }
 
 /* ---------- boot ---------- */
 (async () => {
   try { await initAuth(); } catch(e){ toast("Sign-in setup failed: " + e.message); }
-  renderWho();
+  if (DEMO || account) await loadMe();
+  renderProfile();
   if (DEMO) C.sections.forEach(s => items[s.id] = demoItems(s.id));
   fromHash();
 })();
