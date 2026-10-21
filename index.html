@@ -23,10 +23,11 @@ window.PORTAL_CONFIG = {
   // It is never shared as a whole; each file is shared individually.
   filesFolder: "PowerBI Portal",
   // Folder in the owner's OneDrive that lists which files exist (IDs only,
-  // no file names). Created automatically the first time the owner signs in.
+  // no file names). The portal creates it and gives every colleague access
+  // automatically whenever the owner signs in. Nothing to share by hand.
   indexFolderName: "PowerBI Portal Index",
-  // Share link for the index folder: Share > "People in Zululand Filters" > "Can edit" > Copy link.
-  indexFolderUrl: "",
+  // Name of the OneDrive document library ("Documents" in English tenants).
+  oneDriveLibrary: "Documents",
   // Only these email domains can be given access to a file.
   allowedDomains: ["zululandfilters.co.za"],
   // Operating-section tabs. Each becomes a sub-folder.
@@ -295,7 +296,8 @@ dialog select{font:14px var(--f-body);padding:8px 10px;border:1px solid var(--li
     <p id="accIntro" class="hint"></p>
     <div class="field"><label for="accEmails">Add people by email</label>
       <div class="add-row">
-        <input id="accEmails" type="text" inputmode="email" autocomplete="off" placeholder="name@zululandfilters.co.za, another@…">
+        <input id="accEmails" type="text" inputmode="email" autocomplete="off" list="peopleList" placeholder="Start typing a name or email">
+        <datalist id="peopleList"></datalist>
         <select id="accRole" aria-label="Permission"><option value="read">Can view</option><option value="write">Can edit</option></select>
         <button type="button" class="btn-primary" id="accAdd">Add</button>
       </div>
@@ -316,7 +318,7 @@ dialog select{font:14px var(--f-body);padding:8px 10px;border:1px solid var(--li
 const C = window.PORTAL_CONFIG;
 const DEMO = !C.clientId;
 const GRAPH = "https://graph.microsoft.com/v1.0";
-const SCOPES = ["User.Read","Files.ReadWrite.All"];
+const SCOPES = ["User.Read","User.ReadBasic.All","Files.ReadWrite.All"];
 const LINK_EXT = ".pbireport.json";
 const SEL = "id,name,size,webUrl,lastModifiedDateTime,lastModifiedBy,createdBy,file,parentReference,@microsoft.graph.downloadUrl";
 const $ = s => document.querySelector(s);
@@ -425,23 +427,79 @@ async function loadMe(){
 }
 const shareId = url => "u!" + btoa(unescape(encodeURIComponent(url))).replace(/=+$/,"").replace(/\//g,"_").replace(/\+/g,"-");
 
+let myDriveHost = null;
 async function getMyDrive(){
-  if (!myDriveId) myDriveId = (await graph("/me/drive?$select=id")).id;
+  if (!myDriveId){
+    const d = await graph("/me/drive?$select=id,webUrl");
+    myDriveId = d.id; myDriveHost = new URL(d.webUrl).host;
+  }
   return myDriveId;
 }
-// The index lives in the owner's OneDrive and holds one small entry per file:
-// "<driveId>~<itemId>.json". It contains IDs only, so it reveals no file names.
+
+/* ---------- colleagues directory ---------- */
+let people = null; // [{ name, email }]
+async function listPeople(){
+  if (people) return people;
+  if (DEMO) return people = Object.entries(DEMO_PEOPLE).map(([k, n]) => ({ name:n, email:k + "@zululandfilters.co.za" }));
+  const out = []; let url = "/users?$select=displayName,mail,userPrincipalName&$top=999";
+  while (url){
+    const r = await graph(url);
+    (r?.value || []).forEach(u => {
+      const email = (u.mail || u.userPrincipalName || "").toLowerCase();
+      if (email.includes("@") && !email.includes("#ext#") && domainOk(email)) out.push({ name: u.displayName || email, email });
+    });
+    url = r?.["@odata.nextLink"] || null;
+  }
+  return people = out.sort((a,b) => a.name.localeCompare(b.name));
+}
+const domainOk = e => !C.allowedDomains?.length || C.allowedDomains.includes(e.split("@")[1]);
+
+/* ---------- shared index ----------
+   The index lives in the owner's OneDrive and holds one small entry per file:
+   "<driveId>~<itemId>.json". It contains IDs only, so it reveals no file names.
+   It sits at a fixed address worked out from the owner's email, so no share link is needed. */
+let indexMissing = false;
 async function resolveIndex(){
   if (index) return index;
   if (isOwner()){
     let it = await graph("/me/drive/root:/" + enc(C.indexFolderName));
     if (!it) it = await graph("/me/drive/root/children", { method:"POST", json:{ name:C.indexFolderName, folder:{}, "@microsoft.graph.conflictBehavior":"fail" } });
-    index = { driveId: it.parentReference.driveId, itemId: it.id }; return index;
+    index = { driveId: it.parentReference.driveId, itemId: it.id };
+    syncMembers(); // give every colleague access to the index (background)
+    return index;
   }
-  if (!C.indexFolderUrl) throw new Error("The portal isn't fully set up yet: the index folder link is missing. Ask the portal owner to finish setup.");
-  const it = await graph("/shares/" + shareId(C.indexFolderUrl) + "/driveItem", { headers:{ Prefer:"redeemSharingLink" } });
-  if (!it) throw new Error("You don't have access to the portal index. Ask the portal owner to share it with you.");
+  await getMyDrive();
+  const personal = OWNER.replace(/[^a-z0-9]/g, "_");
+  const url = `https://${myDriveHost}/personal/${personal}/${C.oneDriveLibrary}/${C.indexFolderName}`;
+  let it = null;
+  try { it = await graph("/shares/" + shareId(url) + "/driveItem"); } catch {}
+  if (!it){ try { it = await graph(`/users/${enc(OWNER)}/drive/root:/${enc(C.indexFolderName)}`); } catch {} }
+  if (!it){ indexMissing = true; const e = new Error("NO_INDEX"); e.noIndex = true; throw e; }
+  indexMissing = false;
   index = { driveId: it.parentReference.driveId, itemId: it.id }; return index;
+}
+// Owner only: make sure every colleague can read and add entries to the index.
+// Runs each time the owner opens the portal, so new staff are picked up automatically.
+let syncing = false;
+async function syncMembers(){
+  if (syncing || !isOwner() || DEMO) return; syncing = true;
+  try {
+    const [all, permRes] = await Promise.all([listPeople(), graph(`/drives/${index.driveId}/items/${index.itemId}/permissions`)]);
+    const have = new Set((permRes?.value || []).map(mapPerm).map(p => p.email.toLowerCase()));
+    const missing = all.map(p => p.email).filter(e => e !== OWNER && !have.has(e));
+    let added = 0;
+    for (let i = 0; i < missing.length; i += 20){
+      const chunk = missing.slice(i, i + 20);
+      try { await inviteToIndex(chunk); added += chunk.length; }
+      catch { for (const e of chunk){ try { await inviteToIndex([e]); added++; } catch {} } } // skip accounts that can't be added (e.g. unlicensed)
+    }
+    if (added) toast(`Portal access set up for ${added} colleague${added>1?"s":""}`);
+  } catch {} finally { syncing = false; }
+}
+async function inviteToIndex(emails){
+  const ix = await resolveIndex();
+  await graph(`/drives/${ix.driveId}/items/${ix.itemId}/invite`, { method:"POST",
+    json:{ recipients: emails.map(email => ({ email })), roles:["write"], requireSignIn:true, sendInvitation:false } });
 }
 async function writeEntry(sec, driveId, itemId){
   const ix = await resolveIndex();
@@ -488,8 +546,10 @@ async function grant(it, emails, role, notify){
   }
   await graph(`/drives/${it.parentReference.driveId}/items/${it.id}/invite`, { method:"POST", json:{
     recipients: emails.map(email => ({ email })), roles:[role], requireSignIn:true, sendInvitation:notify,
-    ...(notify ? { message: `${me.name} shared this with you on ${C.portalName}.` } : {})
+    ...(notify ? { message: `${me.name} shared this with you on ${C.portalName}: ${location.origin + location.pathname}` } : {})
   }});
+  // Make sure new colleagues can also see the portal listing straight away (best effort)
+  if (!isOwner()) inviteToIndex(emails.filter(e => e !== OWNER)).catch(() => {});
 }
 async function setRole(it, p, role){
   if (DEMO){ p.role = role; return; }
@@ -508,29 +568,39 @@ async function revoke(it, p){
 /* ---------- data ---------- */
 async function load(sec){
   if (DEMO){ items[sec] = demoItems(sec); return; }
-  const [ix, mine] = [await resolveIndex(), await getMyDrive()];
-  const res = await graph(`/drives/${ix.driveId}/items/${ix.itemId}:/${enc(secName(sec))}:/children?$top=999&$select=id,name`);
-  const entries = (res?.value || []).filter(e => e.name.endsWith(".json")).map(e => {
-    const [d, i] = e.name.slice(0, -5).split("~"); return { d, i, entryId: e.id };
-  }).filter(e => e.d && e.i);
-  const reqs = [];
-  entries.forEach((e, k) => {
-    reqs.push({ id:"f"+k, method:"GET", url:`/drives/${e.d}/items/${e.i}?$select=${SEL}` });
-    if (e.d === mine) reqs.push({ id:"p"+k, method:"GET", url:`/drives/${e.d}/items/${e.i}/permissions` });
-  });
-  const out = await batch(reqs);
+  const mine = await getMyDrive();
+  // 1. Your own uploads: read straight from your OneDrive (always up to date)
+  const own = await graph(`/me/drive/root:/${enc(C.filesFolder)}/${enc(secName(sec))}:/children?$top=999&$select=${SEL}`);
+  const ownList = (own?.value || []).filter(i => i.file);
+  // 2. Colleagues' files: read from the shared index, then fetch each one.
+  //    Files you have no access to fail to load and are simply not shown.
+  let entries = [];
+  try {
+    const ix = await resolveIndex();
+    const res = await graph(`/drives/${ix.driveId}/items/${ix.itemId}:/${enc(secName(sec))}:/children?$top=999&$select=id,name`);
+    entries = (res?.value || []).filter(e => e.name.endsWith(".json")).map(e => {
+      const [d, i] = e.name.slice(0, -5).split("~"); return { d, i, entryId: e.id };
+    }).filter(e => e.d && e.i);
+  } catch(e){ if (!e.noIndex) throw e; }
+  const others = entries.filter(e => e.d !== mine);
+  const reqs = others.map((e, k) => ({ id:"f"+k, method:"GET", url:`/drives/${e.d}/items/${e.i}?$select=${SEL}` }));
+  ownList.forEach((it, k) => reqs.push({ id:"p"+k, method:"GET", url:`/drives/${mine}/items/${it.id}/permissions` }));
+  const out = reqs.length ? await batch(reqs) : {};
   const list = [], seen = new Set();
-  entries.forEach((e, k) => {
-    const r = out["f"+k];
-    if (!r || r.status !== 200 || !r.body?.file){
-      // Your own file was removed from OneDrive directly: tidy up its index entry.
-      if (e.d === mine && r && r.status === 404) deleteEntry(e.entryId);
-      return; // anything else you can't open is simply not shown
-    }
-    if (seen.has(r.body.id)) return; seen.add(r.body.id);
-    const it = r.body; it.entryId = e.entryId; it.mine = e.d === mine;
+  // Your files: attach permissions and index entry; add any missing entries, remove stale ones
+  const myEntries = new Map(entries.filter(e => e.d === mine).map(e => [e.i, e.entryId]));
+  ownList.forEach((it, k) => {
+    it.mine = true; it.entryId = myEntries.get(it.id);
     const p = out["p"+k]; if (p?.status === 200) it.perms = (p.body.value || []).map(mapPerm);
-    list.push(it);
+    if (!it.entryId && !indexMissing) writeEntry(sec, mine, it.id).catch(() => {});
+    seen.add(it.id); list.push(it);
+  });
+  myEntries.forEach((entryId, itemId) => { if (!seen.has(itemId)) deleteEntry(entryId); });
+  others.forEach((e, k) => {
+    const r = out["f"+k];
+    if (!r || r.status !== 200 || !r.body?.file || seen.has(r.body.id)) return;
+    const it = r.body; it.entryId = e.entryId; it.mine = false;
+    seen.add(it.id); list.push(it);
   });
   await Promise.all(list.filter(i => i.name.endsWith(LINK_EXT)).map(async i => {
     try { const j = await (await fetch(i["@microsoft.graph.downloadUrl"])).json(); i.reportUrl = j.url; i.title = j.name; } catch {}
@@ -688,6 +758,9 @@ function renderMain(){
   d.ondrop = e => { e.preventDefault(); d.classList.remove("over"); handleFiles(e.dataTransfer.files); };
   renderList();
 }
+// Shown to a colleague before the owner's portal has given them access to the shared listing
+const waitNote = () => indexMissing && !isOwner()
+  ? `<div class="notice" style="margin:12px 20px 4px">${ic("info")}<div>You can upload and share your own files now. Files colleagues share with you will appear here once the portal owner has opened the portal, which sets up your access automatically.</div></div>` : "";
 function renderList(){
   const t = $("#table"); if (!t) return;
   const head = `<div class="thead" aria-hidden="true"><span></span><span>Name</span><span>Last updated</span><span>Actions</span></div>`;
@@ -702,10 +775,10 @@ function renderList(){
       : filter ? [`Nothing matches "${esc(filter)}"`, "Try a different search."]
       : scope === "mine" ? ["You haven't uploaded anything here", "Upload a file to add it to this section."]
       : ["Nothing shared with you here yet", "Files appear here when a colleague gives you access."];
-    t.innerHTML = `<div class="empty"><span class="big">${ic(none ? "folder" : "search")}</span><b>${msg[0]}</b><span>${msg[1]}</span></div>`;
+    t.innerHTML = waitNote() + `<div class="empty"><span class="big">${ic(none ? "folder" : "search")}</span><b>${msg[0]}</b><span>${msg[1]}</span></div>`;
     return;
   }
-  t.innerHTML = head + list.map(rowHtml).join("");
+  t.innerHTML = waitNote() + head + list.map(rowHtml).join("");
   bindRows();
 }
 function accessLabel(it){
@@ -815,6 +888,9 @@ function openAccess(it, justUploaded = false){
   $("#accEmails").value = ""; $("#accRole").value = "read"; showErr("");
   renderAccess();
   if (!DEMO) act(() => reloadPerms());
+  listPeople().then(ps => {
+    $("#peopleList").innerHTML = ps.filter(p => p.email !== myEmail()).map(p => `<option value="${esc(p.email)}">${esc(p.name)}</option>`).join("");
+  }).catch(() => {});
   return new Promise(res => {
     const d = $("#accessDlg");
     d.onclose = () => { accItem = null; renderList(); res(); };
@@ -902,7 +978,7 @@ async function handleFiles(files){
     }
     try {
       const it = await uploadFile(f, null);
-      await writeEntry(sec, it.parentReference.driveId, it.id);
+      await writeEntry(sec, it.parentReference.driveId, it.id).catch(() => {}); // retried on next load if it fails
       it.mine = true;
       try { await ensureOwnerAccess(it); } catch { toast(`"${f.name}" uploaded, but the portal owner couldn't be given access yet. It will be retried next time you open this tab.`); }
       added.push(it);
@@ -950,7 +1026,7 @@ $("#linkForm").onsubmit = async e => {
     items[current].unshift(created); renderTabs(); renderList(); toast("Link added");
   } else {
     try {
-      const it = await saveLink(name, url); await writeEntry(current, it.parentReference.driveId, it.id);
+      const it = await saveLink(name, url); await writeEntry(current, it.parentReference.driveId, it.id).catch(() => {});
       it.mine = true; try { await ensureOwnerAccess(it); } catch {}
       toast("Link saved"); created = it; await refresh(true);
     }
